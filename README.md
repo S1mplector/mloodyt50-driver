@@ -1,6 +1,6 @@
 # mloody
 
-`mloody` is an Objective-C macOS project scaffold for building a Bloody mouse driver for macOS. 
+`mloody` is an Objective-C macOS project scaffold for building a Bloody T50 mouse driver for macOS. 
 
 The repository is intentionally layered so core behavior stays decoupled from macOS-specific I/O and transport details.
 
@@ -17,7 +17,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-## CLI (Current Scaffold)
+## CLI (Current)
 
 ```bash
 ./build/mloody list
@@ -27,6 +27,9 @@ ctest --test-dir build --output-on-failure
 ./build/mloody feature-scan --from 0x01 --to 0x10 --length 16
 ./build/mloody t50 backlight-get
 ./build/mloody t50 backlight-set --level 2
+./build/mloody t50 core-get
+./build/mloody t50 core-set --core 2 --save 1 --strategy capture-v1
+./build/mloody t50 save --strategy quick
 ./build/mloody t50 command-read --opcode 0x11 --flag 0x00
 ./build/mloody t50 command-write --opcode 0x11 --data "ff 00 00" --offset 8
 ```
@@ -69,11 +72,12 @@ Available tools:
 ./build/mloody t50 polling-probe --opcode 0x21 --hz 1000
 ./build/mloody t50 lod-probe --opcode 0x22 --lod 2
 ./build/mloody t50 color-probe --opcode 0x13 --r 255 --g 0 --b 0
+./build/mloody t50 core-get
+./build/mloody t50 core-set --core 1 --save 1 --strategy capture-v1
+./build/mloody t50 save --strategy capture-v1
 ```
 
 `dpi-probe`/`polling-probe`/`lod-probe`/`color-probe` are mapping helpers; they are intentionally explicit about opcode so you can test and confirm behavior on your own device before we lock in stable named mappings.
+`core-get`/`core-set` are currently candidate mappings (`read opcode 0x1e`, `write opcode 0x0c payload 06 80 <core>`) and should be validated on hardware.
+`t50 save` is an experimental persistence helper based on observed command sequences (`quick`, `capture-v1`) and should be validated on real hardware by unplug/replug testing.
 
-## Notes for Real Driver Work
-
-- Modern macOS driver development favors DriverKit/system extensions over legacy kernel extensions.
-- Bloody protocol work (feature reports, endpoint behavior, profile packet format) should be implemented in the outbound transport adapter without changing domain or use-case code.

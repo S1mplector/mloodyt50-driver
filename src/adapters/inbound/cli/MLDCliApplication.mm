@@ -488,6 +488,9 @@
     printf("t50 subcommands:\n");
     printf("  t50 backlight-get [selectors]\n");
     printf("  t50 backlight-set --level <0..3> [selectors]\n");
+    printf("  t50 core-get [selectors]\n");
+    printf("  t50 core-set --core <1..4> [--save <0|1>] [--strategy <quick|capture-v1>] [selectors]\n");
+    printf("  t50 save [--strategy <quick|capture-v1>] [selectors]\n");
     printf("  t50 command-read --opcode <n> [--flag <n>] [--offset <n>] [--data <hex>] [selectors]\n");
     printf("  t50 command-write --opcode <n> --data <hex> [--flag <n>] [--offset <n>] [selectors]\n");
     printf("  t50 opcode-scan [--from <n>] [--to <n>] [--flag <n>] [--offset <n>] [--data <hex>] [selectors]\n");
@@ -515,6 +518,15 @@
     }
     if ([subcommand isEqualToString:@"backlight-set"]) {
         return [self runT50BacklightSetWithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"core-get"]) {
+        return [self runT50CoreGetWithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"core-set"]) {
+        return [self runT50CoreSetWithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"save"]) {
+        return [self runT50SaveWithArguments:subArguments];
     }
     if ([subcommand isEqualToString:@"command-read"]) {
         return [self runT50CommandReadWithArguments:subArguments];
@@ -620,6 +632,153 @@
     }
 
     printf("t50 backlight-set ok level=%lu\n", (unsigned long)levelValue);
+    return 0;
+}
+
+- (int)runT50CoreGetWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[@"--vid", @"--pid", @"--serial", @"--model"]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    MLDMouseDevice *target = [self selectT50DeviceWithOptions:options errorMessage:&parseError];
+    if (target == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSError *error = nil;
+    NSNumber *slot = [self.t50ExchangeCommandUseCase readCoreSlotCandidateForDevice:target error:&error];
+    if (slot == nil) {
+        fprintf(stderr, "t50 core-get error: %s\n", error.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    printf("t50 core-get candidate=%lu\n", (unsigned long)slot.unsignedIntegerValue);
+    return 0;
+}
+
+- (int)runT50CoreSetWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed =
+        [NSSet setWithArray:@[@"--core", @"--save", @"--strategy", @"--vid", @"--pid", @"--serial", @"--model"]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *coreString = options[@"--core"];
+    if (coreString == nil) {
+        fprintf(stderr, "t50 core-set requires --core <1..4>.\n");
+        return 1;
+    }
+
+    NSUInteger coreValue = 0;
+    NSUInteger saveValue = 1;
+    if (![self parseRequiredUnsigned:coreString maxValue:4 fieldName:@"--core" output:&coreValue errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+    if (![self parseOptionalUnsigned:options[@"--save"] maxValue:1 fieldName:@"--save" output:&saveValue errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *strategyOption = options[@"--strategy"] ?: @"capture-v1";
+    MLDT50SaveStrategy strategy = MLDT50SaveStrategyCaptureV1;
+    if ([strategyOption isEqualToString:@"quick"]) {
+        strategy = MLDT50SaveStrategyQuick;
+    } else if ([strategyOption isEqualToString:@"capture-v1"]) {
+        strategy = MLDT50SaveStrategyCaptureV1;
+    } else {
+        fprintf(stderr, "t50 core-set --strategy must be one of: quick, capture-v1.\n");
+        return 1;
+    }
+
+    MLDMouseDevice *target = [self selectT50DeviceWithOptions:options errorMessage:&parseError];
+    if (target == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSError *setError = nil;
+    BOOL setOK = [self.t50ExchangeCommandUseCase setCoreSlotCandidate:(uint8_t)coreValue onDevice:target error:&setError];
+    if (!setOK) {
+        fprintf(stderr, "t50 core-set error: %s\n", setError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    if (saveValue == 1) {
+        NSError *saveError = nil;
+        BOOL saveOK = [self.t50ExchangeCommandUseCase saveSettingsToDevice:target strategy:strategy error:&saveError];
+        if (!saveOK) {
+            fprintf(stderr, "t50 core-set save error: %s\n", saveError.localizedDescription.UTF8String);
+            return 1;
+        }
+    }
+
+    printf("t50 core-set candidate=%lu save=%lu strategy=%s\n",
+           (unsigned long)coreValue,
+           (unsigned long)saveValue,
+           strategyOption.UTF8String);
+    return 0;
+}
+
+- (int)runT50SaveWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[@"--strategy", @"--vid", @"--pid", @"--serial", @"--model"]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *strategyOption = options[@"--strategy"] ?: @"quick";
+    MLDT50SaveStrategy strategy = MLDT50SaveStrategyQuick;
+    if ([strategyOption isEqualToString:@"quick"]) {
+        strategy = MLDT50SaveStrategyQuick;
+    } else if ([strategyOption isEqualToString:@"capture-v1"]) {
+        strategy = MLDT50SaveStrategyCaptureV1;
+    } else {
+        fprintf(stderr, "t50 save --strategy must be one of: quick, capture-v1.\n");
+        return 1;
+    }
+
+    MLDMouseDevice *target = [self selectT50DeviceWithOptions:options errorMessage:&parseError];
+    if (target == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSError *saveError = nil;
+    BOOL ok = [self.t50ExchangeCommandUseCase saveSettingsToDevice:target strategy:strategy error:&saveError];
+    if (!ok) {
+        fprintf(stderr, "t50 save error: %s\n", saveError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    printf("t50 save ok strategy=%s steps=%lu\n",
+           strategyOption.UTF8String,
+           (unsigned long)[MLDT50ExchangeVendorCommandUseCase saveStepCountForStrategy:strategy]);
     return 0;
 }
 

@@ -40,7 +40,7 @@ No outward dependency should leak into `domain` or use cases.
   - `MLDInMemoryFeatureTransportAdapter`
 - Inbound CLI adapter:
   - `MLDCliApplication`
-  - Includes `t50` mapping utilities (`backlight-*`, `opcode-scan`, `dpi/polling/lod/color-probe`)
+  - Includes `t50` mapping utilities (`backlight-*`, `core-*`, `save`, `opcode-scan`, `dpi/polling/lod/color-probe`)
 
 ## Extension Path
 

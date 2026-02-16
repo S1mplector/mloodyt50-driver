@@ -12,6 +12,34 @@ static const uint8_t MLDT50BacklightOpcode = 0x11;
 static const uint8_t MLDT50WriteFlag = 0x80;
 static const uint8_t MLDT50ReadFlag = 0x00;
 static const NSUInteger MLDT50BacklightPayloadOffset = 8;
+static const uint8_t MLDT50CoreSetOpcodeCandidate = 0x0C;
+static const uint8_t MLDT50CoreReadOpcodeCandidate = 0x1E;
+static const NSUInteger MLDT50CorePayloadOffset = 8;
+static const uint8_t MLDT50CoreCommandPrefix0 = 0x06;
+static const uint8_t MLDT50CoreCommandPrefix1 = 0x80;
+static const uint8_t MLDT50CoreSlotMin = 1;
+static const uint8_t MLDT50CoreSlotMax = 4;
+
+typedef struct {
+    uint8_t opcode;
+    uint8_t writeFlag;
+    NSUInteger payloadOffset;
+    uint8_t payload[8];
+    NSUInteger payloadLength;
+} MLDT50SaveStep;
+
+static const MLDT50SaveStep MLDT50QuickSaveSequence[] = {
+    {0x03, 0x00, 2, {0x03, 0x0B, 0x01}, 3},
+    {0x03, 0x00, 2, {0x03, 0x0B, 0x00}, 3},
+};
+
+static const MLDT50SaveStep MLDT50CaptureV1SaveSequence[] = {
+    {0x03, 0x00, 2, {0x06, 0x05}, 2},
+    {0x03, 0x00, 2, {0x06, 0x06}, 2},
+    {0x03, 0x00, 2, {0x06, 0x02}, 2},
+    {0x03, 0x00, 2, {0x03, 0x0B, 0x01}, 3},
+    {0x03, 0x00, 2, {0x03, 0x0B, 0x00}, 3},
+};
 
 @interface MLDT50ExchangeVendorCommandUseCase ()
 
@@ -37,6 +65,17 @@ static const NSUInteger MLDT50BacklightPayloadOffset = 8;
 
 + (uint8_t)reportID {
     return MLDT50ReportID;
+}
+
++ (NSUInteger)saveStepCountForStrategy:(MLDT50SaveStrategy)strategy {
+    switch (strategy) {
+        case MLDT50SaveStrategyQuick:
+            return sizeof(MLDT50QuickSaveSequence) / sizeof(MLDT50QuickSaveSequence[0]);
+        case MLDT50SaveStrategyCaptureV1:
+            return sizeof(MLDT50CaptureV1SaveSequence) / sizeof(MLDT50CaptureV1SaveSequence[0]);
+    }
+
+    return 0;
 }
 
 - (nullable NSData *)executeForDevice:(MLDMouseDevice *)device
@@ -151,6 +190,108 @@ static const NSUInteger MLDT50BacklightPayloadOffset = 8;
 
     const uint8_t *bytes = (const uint8_t *)response.bytes;
     return @(bytes[MLDT50BacklightPayloadOffset]);
+}
+
+- (BOOL)setCoreSlotCandidate:(uint8_t)slot
+                    onDevice:(MLDMouseDevice *)device
+                       error:(NSError **)error {
+    if (slot < MLDT50CoreSlotMin || slot > MLDT50CoreSlotMax) {
+        if (error != nil) {
+            NSString *message =
+                [NSString stringWithFormat:@"Core slot must be between %u and %u.",
+                                           MLDT50CoreSlotMin,
+                                           MLDT50CoreSlotMax];
+            *error = [NSError errorWithDomain:MLDT50ControlErrorDomain
+                                         code:MLDT50ControlErrorCodeInvalidCoreSlot
+                                     userInfo:@{NSLocalizedDescriptionKey : message}];
+        }
+        return NO;
+    }
+
+    uint8_t payloadBytes[3] = {MLDT50CoreCommandPrefix0, MLDT50CoreCommandPrefix1, slot};
+    NSData *payload = [NSData dataWithBytes:payloadBytes length:sizeof(payloadBytes)];
+    NSData *response = [self executeForDevice:device
+                                       opcode:MLDT50CoreSetOpcodeCandidate
+                                    writeFlag:MLDT50ReadFlag
+                                payloadOffset:MLDT50CorePayloadOffset
+                                      payload:payload
+                                        error:error];
+    return response != nil;
+}
+
+- (nullable NSNumber *)readCoreSlotCandidateForDevice:(MLDMouseDevice *)device
+                                                 error:(NSError **)error {
+    NSData *response = [self executeForDevice:device
+                                       opcode:MLDT50CoreReadOpcodeCandidate
+                                    writeFlag:MLDT50ReadFlag
+                                payloadOffset:MLDT50CorePayloadOffset
+                                      payload:[NSData data]
+                                        error:error];
+    if (response == nil || response.length <= (MLDT50CorePayloadOffset + 2)) {
+        return nil;
+    }
+
+    const uint8_t *bytes = (const uint8_t *)response.bytes;
+    return @(bytes[MLDT50CorePayloadOffset + 2]);
+}
+
+- (BOOL)saveSettingsToDevice:(MLDMouseDevice *)device
+                    strategy:(MLDT50SaveStrategy)strategy
+                       error:(NSError **)error {
+    const MLDT50SaveStep *steps = NULL;
+    NSUInteger stepCount = 0;
+
+    switch (strategy) {
+        case MLDT50SaveStrategyQuick:
+            steps = MLDT50QuickSaveSequence;
+            stepCount = sizeof(MLDT50QuickSaveSequence) / sizeof(MLDT50QuickSaveSequence[0]);
+            break;
+        case MLDT50SaveStrategyCaptureV1:
+            steps = MLDT50CaptureV1SaveSequence;
+            stepCount = sizeof(MLDT50CaptureV1SaveSequence) / sizeof(MLDT50CaptureV1SaveSequence[0]);
+            break;
+        default:
+            if (error != nil) {
+                NSString *message = [NSString stringWithFormat:@"Unsupported T50 save strategy: %lu.",
+                                                             (unsigned long)strategy];
+                *error = [NSError errorWithDomain:MLDT50ControlErrorDomain
+                                             code:MLDT50ControlErrorCodeUnsupportedSaveStrategy
+                                         userInfo:@{NSLocalizedDescriptionKey : message}];
+            }
+            return NO;
+    }
+
+    for (NSUInteger index = 0; index < stepCount; ++index) {
+        const MLDT50SaveStep step = steps[index];
+        NSData *payload = [NSData dataWithBytes:step.payload length:step.payloadLength];
+        NSError *stepError = nil;
+        NSData *response = [self executeForDevice:device
+                                           opcode:step.opcode
+                                        writeFlag:step.writeFlag
+                                    payloadOffset:step.payloadOffset
+                                          payload:payload
+                                            error:&stepError];
+        if (response == nil) {
+            if (error != nil) {
+                NSString *message =
+                    [NSString stringWithFormat:@"T50 save failed at step %lu/%lu (opcode=0x%02x).",
+                                               (unsigned long)(index + 1),
+                                               (unsigned long)stepCount,
+                                               step.opcode];
+                NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithObject:message
+                                                                                     forKey:NSLocalizedDescriptionKey];
+                if (stepError != nil) {
+                    userInfo[NSUnderlyingErrorKey] = stepError;
+                }
+                *error = [NSError errorWithDomain:MLDT50ControlErrorDomain
+                                             code:MLDT50ControlErrorCodeSaveSequenceFailed
+                                         userInfo:userInfo];
+            }
+            return NO;
+        }
+    }
+
+    return YES;
 }
 
 @end
