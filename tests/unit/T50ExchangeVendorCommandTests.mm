@@ -325,18 +325,26 @@ int main(void) {
         }
 
         const uint8_t *captureV2FirstPacket = (const uint8_t *)saveSpy.writes.firstObject.bytes;
-        if (!Expect(captureV2FirstPacket[1] == 0x14 && captureV2FirstPacket[8] == 0x40,
-                    @"Expected capture-v2 first packet to match 14 .. 40 preamble.")) {
+        if (!Expect(captureV2FirstPacket[1] == 0x03 && captureV2FirstPacket[2] == 0x03 &&
+                        captureV2FirstPacket[3] == 0x0B && captureV2FirstPacket[4] == 0x00,
+                    @"Expected capture-v2 first packet to match 03 03 0B 00 save release.")) {
             return 1;
         }
-        const uint8_t *captureV2ThirdPacket = (const uint8_t *)saveSpy.writes[2].bytes;
-        if (!Expect(captureV2ThirdPacket[1] == 0x2F && captureV2ThirdPacket[24] == 0x02 && captureV2ThirdPacket[29] == 0xE2,
-                    @"Expected capture-v2 third packet to match 2f preamble payload bytes.")) {
+        const uint8_t *captureV2FourthPacket = (const uint8_t *)saveSpy.writes[3].bytes;
+        if (!Expect(captureV2FourthPacket[1] == 0x2F && captureV2FourthPacket[24] == 0x02 &&
+                        captureV2FourthPacket[29] == 0xE2,
+                    @"Expected capture-v2 fourth packet to match 2f save preamble bytes.")) {
+            return 1;
+        }
+        const uint8_t *captureV2SeventhPacket = (const uint8_t *)saveSpy.writes[6].bytes;
+        if (!Expect(captureV2SeventhPacket[1] == 0x0C && captureV2SeventhPacket[8] == 0x06 &&
+                        captureV2SeventhPacket[9] == 0x80 && captureV2SeventhPacket[10] == 0x01,
+                    @"Expected capture-v2 seventh packet to match 0c 06 80 01 apply candidate.")) {
             return 1;
         }
         const uint8_t *captureV2LastPacket = (const uint8_t *)saveSpy.writes.lastObject.bytes;
-        if (!Expect(captureV2LastPacket[1] == 0x03 && captureV2LastPacket[2] == 0x06 && captureV2LastPacket[3] == 0x06,
-                    @"Expected capture-v2 tail packet to end with 03 06 06.")) {
+        if (!Expect(captureV2LastPacket[1] == 0x0A,
+                    @"Expected capture-v2 tail packet to end with opcode 0x0A.")) {
             return 1;
         }
 

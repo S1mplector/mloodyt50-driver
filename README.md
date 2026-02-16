@@ -103,4 +103,4 @@ Use `--prepare 1` to run the captured preamble (`open` + `0x00 0x02`) before RGB
 Current mapping hypothesis for T50 packets: `logo=slot 15`, `wheel=slots 7,8,21`, `wheel-indicator=slot 21`, `rear=slots 1-6,9-14,16-20`, `all=slots 1-21`.
 `core-get` decodes from `opcode 0x1f` (`word @ payload[2..3]`, core = `(word & 0x3) + 1`), and `core-state` prints raw decode fields for RE.
 `core-set` remains a candidate mapping (`write opcode 0x0c payload 06 80 <core>`) and should still be validated on hardware.
-`t50 save` is an experimental persistence helper with strategies `quick`, `capture-v1`, and `capture-v2` (expanded pre/post transaction envelope from capture traces). Prefer `quick` during live color testing, as `capture-v2` can trigger temporary LED mode transitions.
+`t50 save` is an experimental persistence helper with strategies `quick`, `capture-v1`, and `capture-v2`. `capture-v2` now mirrors the Windows "OK/save" commit tail (`03 03 0b 00`, `14`, `05`, `2f`, `0e`, `0f`, `0c`, `0a`) and is the preferred strategy when testing on-device persistence.
