@@ -500,7 +500,9 @@
     printf("  t50 dpi-probe --opcode <n> --dpi <n> [--flag <n>] [--offset <n>] [selectors]\n");
     printf("  t50 polling-probe --opcode <n> --hz <n> [--flag <n>] [--offset <n>] [selectors]\n");
     printf("  t50 lod-probe --opcode <n> --lod <n> [--flag <n>] [--offset <n>] [selectors]\n");
-    printf("  t50 color-direct --r <n> --g <n> --b <n> [--slots <1..20>] [--slot <1..20>] [--save <0|1>] [--strategy <quick|capture-v1|capture-v2>] [selectors]\n");
+    printf("  t50 color-mode --mode <open|constant|discard> [selectors]\n");
+    printf("  t50 color-direct --r <n> --g <n> --b <n> [--slots <1..20>] [--slot <1..20>] [--prepare <0|1>] [--save <0|1>] [--strategy <quick|capture-v1|capture-v2>] [selectors]\n");
+    printf("  t50 color-zone --zone <logo|wheel|rear|all> --r <n> --g <n> --b <n> [--prepare <0|1>] [--save <0|1>] [--strategy <quick|capture-v1|capture-v2>] [selectors]\n");
     printf("  t50 color-probe --opcode <n> --r <n> --g <n> --b <n> [--flag <n>] [--offset <n>] [selectors]\n");
     printf("\n");
     printf("selectors: --vid --pid --serial --model\n");
@@ -557,8 +559,14 @@
     if ([subcommand isEqualToString:@"lod-probe"]) {
         return [self runT50LODProbeWithArguments:subArguments];
     }
+    if ([subcommand isEqualToString:@"color-mode"]) {
+        return [self runT50ColorModeWithArguments:subArguments];
+    }
     if ([subcommand isEqualToString:@"color-direct"]) {
         return [self runT50ColorDirectWithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"color-zone"]) {
+        return [self runT50ColorZoneWithArguments:subArguments];
     }
     if ([subcommand isEqualToString:@"color-probe"]) {
         return [self runT50ColorProbeWithArguments:subArguments];
@@ -1497,6 +1505,93 @@
                                 successLabel:@"t50 lod-probe"];
 }
 
+- (BOOL)sendT50ColorMenuPayload:(NSData *)payload
+                        onDevice:(MLDMouseDevice *)device
+                           error:(NSError **)error {
+    NSData *response = [self.t50ExchangeCommandUseCase executeForDevice:device
+                                                                  opcode:0x03
+                                                               writeFlag:0x00
+                                                           payloadOffset:2
+                                                                 payload:payload
+                                                                   error:error];
+    return response != nil;
+}
+
+- (BOOL)prepareT50ColorWriteSessionOnDevice:(MLDMouseDevice *)device
+                                      error:(NSError **)error {
+    const uint8_t openMode[] = {0x06, 0x01, 0x00, 0x00, 0x01, 0x02};
+    NSData *openPayload = [NSData dataWithBytes:openMode length:sizeof(openMode)];
+    if (![self sendT50ColorMenuPayload:openPayload onDevice:device error:error]) {
+        return NO;
+    }
+
+    const uint8_t constantMode[] = {0x06, 0x01, 0x00, 0x00, 0x00, 0x02};
+    NSData *constantPayload = [NSData dataWithBytes:constantMode length:sizeof(constantMode)];
+    return [self sendT50ColorMenuPayload:constantPayload onDevice:device error:error];
+}
+
+- (int)runT50ColorModeWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[@"--mode", @"--vid", @"--pid", @"--serial", @"--model"]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *mode = options[@"--mode"];
+    if (mode == nil) {
+        fprintf(stderr, "t50 color-mode requires --mode <open|constant|discard>.\n");
+        return 1;
+    }
+
+    MLDMouseDevice *target = [self selectT50DeviceWithOptions:options errorMessage:&parseError];
+    if (target == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *normalizedMode = mode.lowercaseString;
+    uint8_t modeBytes[6] = {0};
+    if ([normalizedMode isEqualToString:@"open"]) {
+        modeBytes[0] = 0x06;
+        modeBytes[1] = 0x01;
+        modeBytes[4] = 0x01;
+        modeBytes[5] = 0x02;
+    } else if ([normalizedMode isEqualToString:@"constant"]) {
+        modeBytes[0] = 0x06;
+        modeBytes[1] = 0x01;
+        modeBytes[4] = 0x00;
+        modeBytes[5] = 0x02;
+    } else if ([normalizedMode isEqualToString:@"discard"]) {
+        modeBytes[0] = 0x06;
+        modeBytes[1] = 0x01;
+        modeBytes[4] = 0x00;
+        modeBytes[5] = 0x00;
+    } else {
+        fprintf(stderr, "t50 color-mode --mode must be one of: open, constant, discard.\n");
+        return 1;
+    }
+
+    NSData *payload = [NSData dataWithBytes:modeBytes length:sizeof(modeBytes)];
+    NSError *writeError = nil;
+    BOOL ok = [self sendT50ColorMenuPayload:payload onDevice:target error:&writeError];
+    if (!ok) {
+        fprintf(stderr, "t50 color-mode error: %s\n", writeError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    printf("t50 color-mode ok mode=%s payload=%s\n",
+           normalizedMode.UTF8String,
+           [self hexStringFromData:payload].UTF8String);
+    return 0;
+}
+
 - (int)runT50ColorDirectWithArguments:(NSArray<NSString *> *)arguments {
     NSString *parseError = nil;
     NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
@@ -1506,7 +1601,7 @@
     }
 
     NSSet<NSString *> *allowed = [NSSet setWithArray:@[
-        @"--r", @"--g", @"--b", @"--slots", @"--slot", @"--save", @"--strategy", @"--vid", @"--pid", @"--serial", @"--model"
+        @"--r", @"--g", @"--b", @"--slots", @"--slot", @"--prepare", @"--save", @"--strategy", @"--vid", @"--pid", @"--serial", @"--model"
     ]];
     if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
         fprintf(stderr, "%s\n", parseError.UTF8String);
@@ -1526,12 +1621,14 @@
     NSUInteger blue = 0;
     NSUInteger slots = 20;
     NSUInteger slot = 0;
+    NSUInteger prepareValue = 1;
     NSUInteger saveValue = 1;
     if (![self parseRequiredUnsigned:rString maxValue:255 fieldName:@"--r" output:&red errorMessage:&parseError] ||
         ![self parseRequiredUnsigned:gString maxValue:255 fieldName:@"--g" output:&green errorMessage:&parseError] ||
         ![self parseRequiredUnsigned:bString maxValue:255 fieldName:@"--b" output:&blue errorMessage:&parseError] ||
         ![self parseOptionalUnsigned:options[@"--slots"] maxValue:20 fieldName:@"--slots" output:&slots errorMessage:&parseError] ||
         ![self parseOptionalUnsigned:options[@"--slot"] maxValue:20 fieldName:@"--slot" output:&slot errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--prepare"] maxValue:1 fieldName:@"--prepare" output:&prepareValue errorMessage:&parseError] ||
         ![self parseOptionalUnsigned:options[@"--save"] maxValue:1 fieldName:@"--save" output:&saveValue errorMessage:&parseError]) {
         fprintf(stderr, "%s\n", parseError.UTF8String);
         return 1;
@@ -1563,6 +1660,15 @@
     if (target == nil) {
         fprintf(stderr, "%s\n", parseError.UTF8String);
         return 1;
+    }
+
+    if (prepareValue == 1) {
+        NSError *prepareError = nil;
+        BOOL prepared = [self prepareT50ColorWriteSessionOnDevice:target error:&prepareError];
+        if (!prepared) {
+            fprintf(stderr, "t50 color-direct prepare error: %s\n", prepareError.localizedDescription.UTF8String);
+            return 1;
+        }
     }
 
     static const NSUInteger kDirectSlotCount = 20;
@@ -1600,21 +1706,166 @@
     }
 
     if (slot > 0) {
-        printf("t50 color-direct ok r=%lu g=%lu b=%lu slot=%lu save=%lu strategy=%s\n",
+        printf("t50 color-direct ok r=%lu g=%lu b=%lu slot=%lu prepare=%lu save=%lu strategy=%s\n",
                (unsigned long)red,
                (unsigned long)green,
                (unsigned long)blue,
                (unsigned long)slot,
+               (unsigned long)prepareValue,
                (unsigned long)saveValue,
                strategyOption.UTF8String);
         return 0;
     }
 
-    printf("t50 color-direct ok r=%lu g=%lu b=%lu slots=%lu save=%lu strategy=%s\n",
+    printf("t50 color-direct ok r=%lu g=%lu b=%lu slots=%lu prepare=%lu save=%lu strategy=%s\n",
            (unsigned long)red,
            (unsigned long)green,
            (unsigned long)blue,
            (unsigned long)slots,
+           (unsigned long)prepareValue,
+           (unsigned long)saveValue,
+           strategyOption.UTF8String);
+    return 0;
+}
+
+- (int)runT50ColorZoneWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[
+        @"--zone", @"--r", @"--g", @"--b", @"--prepare", @"--save", @"--strategy", @"--vid", @"--pid", @"--serial", @"--model"
+    ]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *zoneString = options[@"--zone"];
+    NSString *rString = options[@"--r"];
+    NSString *gString = options[@"--g"];
+    NSString *bString = options[@"--b"];
+    if (zoneString == nil || rString == nil || gString == nil || bString == nil) {
+        fprintf(stderr, "t50 color-zone requires --zone, --r, --g, and --b.\n");
+        return 1;
+    }
+
+    NSUInteger red = 0;
+    NSUInteger green = 0;
+    NSUInteger blue = 0;
+    NSUInteger prepareValue = 1;
+    NSUInteger saveValue = 0;
+    if (![self parseRequiredUnsigned:rString maxValue:255 fieldName:@"--r" output:&red errorMessage:&parseError] ||
+        ![self parseRequiredUnsigned:gString maxValue:255 fieldName:@"--g" output:&green errorMessage:&parseError] ||
+        ![self parseRequiredUnsigned:bString maxValue:255 fieldName:@"--b" output:&blue errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--prepare"] maxValue:1 fieldName:@"--prepare" output:&prepareValue errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--save"] maxValue:1 fieldName:@"--save" output:&saveValue errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *normalizedZone = zoneString.lowercaseString;
+    static const NSUInteger kDirectSlotCount = 20;
+    BOOL slotEnabled[kDirectSlotCount];
+    memset(slotEnabled, 0, sizeof(slotEnabled));
+
+    NSMutableArray<NSString *> *selectedSlots = [NSMutableArray array];
+    if ([normalizedZone isEqualToString:@"logo"]) {
+        slotEnabled[7] = YES;  // Slot 8 from OpenRGB W70/W90 map.
+        [selectedSlots addObject:@"8"];
+    } else if ([normalizedZone isEqualToString:@"wheel"]) {
+        slotEnabled[14] = YES; // Slot 15 from OpenRGB W70/W90 map.
+        [selectedSlots addObject:@"15"];
+    } else if ([normalizedZone isEqualToString:@"rear"]) {
+        const NSUInteger rearSlots[] = {1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14};
+        const NSUInteger rearSlotCount = sizeof(rearSlots) / sizeof(rearSlots[0]);
+        for (NSUInteger index = 0; index < rearSlotCount; ++index) {
+            NSUInteger slot = rearSlots[index];
+            slotEnabled[slot - 1] = YES;
+            [selectedSlots addObject:[NSString stringWithFormat:@"%lu", (unsigned long)slot]];
+        }
+    } else if ([normalizedZone isEqualToString:@"all"]) {
+        for (NSUInteger slot = 1; slot <= 15; ++slot) {
+            slotEnabled[slot - 1] = YES;
+            [selectedSlots addObject:[NSString stringWithFormat:@"%lu", (unsigned long)slot]];
+        }
+    } else {
+        fprintf(stderr, "t50 color-zone --zone must be one of: logo, wheel, rear, all.\n");
+        return 1;
+    }
+
+    NSString *strategyOption = options[@"--strategy"] ?: @"capture-v2";
+    MLDT50SaveStrategy strategy = MLDT50SaveStrategyCaptureV2;
+    if ([strategyOption isEqualToString:@"quick"]) {
+        strategy = MLDT50SaveStrategyQuick;
+    } else if ([strategyOption isEqualToString:@"capture-v1"]) {
+        strategy = MLDT50SaveStrategyCaptureV1;
+    } else if ([strategyOption isEqualToString:@"capture-v2"]) {
+        strategy = MLDT50SaveStrategyCaptureV2;
+    } else {
+        fprintf(stderr, "t50 color-zone --strategy must be one of: quick, capture-v1, capture-v2.\n");
+        return 1;
+    }
+
+    MLDMouseDevice *target = [self selectT50DeviceWithOptions:options errorMessage:&parseError];
+    if (target == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    if (prepareValue == 1) {
+        NSError *prepareError = nil;
+        BOOL prepared = [self prepareT50ColorWriteSessionOnDevice:target error:&prepareError];
+        if (!prepared) {
+            fprintf(stderr, "t50 color-zone prepare error: %s\n", prepareError.localizedDescription.UTF8String);
+            return 1;
+        }
+    }
+
+    NSMutableData *payload = [NSMutableData dataWithLength:2 + 4 + (3 * kDirectSlotCount)];
+    uint8_t *payloadBytes = (uint8_t *)payload.mutableBytes;
+    payloadBytes[0] = 0x06;
+    payloadBytes[1] = 0x02;
+    NSUInteger startOffset = 6;
+    for (NSUInteger index = 0; index < kDirectSlotCount; ++index) {
+        BOOL shouldSet = slotEnabled[index];
+        payloadBytes[startOffset + (3 * index) + 0] = shouldSet ? (uint8_t)red : 0x00;
+        payloadBytes[startOffset + (3 * index) + 1] = shouldSet ? (uint8_t)green : 0x00;
+        payloadBytes[startOffset + (3 * index) + 2] = shouldSet ? (uint8_t)blue : 0x00;
+    }
+
+    NSError *writeError = nil;
+    NSData *response = [self.t50ExchangeCommandUseCase executeForDevice:target
+                                                                  opcode:0x03
+                                                               writeFlag:0x00
+                                                           payloadOffset:2
+                                                                 payload:payload
+                                                                   error:&writeError];
+    if (response == nil) {
+        fprintf(stderr, "t50 color-zone write error: %s\n", writeError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    if (saveValue == 1) {
+        NSError *saveError = nil;
+        BOOL saved = [self.t50ExchangeCommandUseCase saveSettingsToDevice:target strategy:strategy error:&saveError];
+        if (!saved) {
+            fprintf(stderr, "t50 color-zone save error: %s\n", saveError.localizedDescription.UTF8String);
+            return 1;
+        }
+    }
+
+    NSString *slotSummary = [selectedSlots componentsJoinedByString:@","];
+    printf("t50 color-zone ok zone=%s slots=%s r=%lu g=%lu b=%lu prepare=%lu save=%lu strategy=%s\n",
+           normalizedZone.UTF8String,
+           slotSummary.UTF8String,
+           (unsigned long)red,
+           (unsigned long)green,
+           (unsigned long)blue,
+           (unsigned long)prepareValue,
            (unsigned long)saveValue,
            strategyOption.UTF8String);
     return 0;
