@@ -1,0 +1,17 @@
+# CMake
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Misc
+*.swp
+*.tmp

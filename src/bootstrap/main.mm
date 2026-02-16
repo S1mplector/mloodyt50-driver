@@ -1,0 +1,23 @@
+#import <Foundation/Foundation.h>
+
+#import "adapters/inbound/cli/MLDCliApplication.h"
+#import "adapters/outbound/iokit/MLDIOKitDeviceDiscoveryAdapter.h"
+#import "adapters/outbound/iokit/MLDIOKitFeatureTransportAdapter.h"
+#import "application/use_cases/MLDApplyPerformanceProfileUseCase.h"
+#import "application/use_cases/MLDDiscoverSupportedDevicesUseCase.h"
+
+int main(int argc, const char *argv[]) {
+    @autoreleasepool {
+        MLDIOKitDeviceDiscoveryAdapter *discoveryAdapter = [[MLDIOKitDeviceDiscoveryAdapter alloc] init];
+        MLDIOKitFeatureTransportAdapter *featureAdapter = [[MLDIOKitFeatureTransportAdapter alloc] init];
+
+        MLDDiscoverSupportedDevicesUseCase *discoverUseCase =
+            [[MLDDiscoverSupportedDevicesUseCase alloc] initWithDiscoveryPort:discoveryAdapter];
+        MLDApplyPerformanceProfileUseCase *applyUseCase =
+            [[MLDApplyPerformanceProfileUseCase alloc] initWithFeatureTransportPort:featureAdapter];
+
+        MLDCliApplication *app = [[MLDCliApplication alloc] initWithDiscoverUseCase:discoverUseCase
+                                                                 applyProfileUseCase:applyUseCase];
+        return [app runWithArgc:argc argv:argv];
+    }
+}
