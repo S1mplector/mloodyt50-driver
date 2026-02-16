@@ -28,6 +28,7 @@ No outward dependency should leak into `domain` or use cases.
 - `MLDApplyPerformanceProfileUseCase`: Validates profile then sends through port.
 - `MLDWriteFeatureReportUseCase`: Raw feature-report write path for direct device control.
 - `MLDReadFeatureReportUseCase`: Raw feature-report read path for device introspection.
+- `MLDT50ExchangeVendorCommandUseCase`: Encodes/exchanges T50 vendor packets (report id `0x07`, 72-byte frame).
 
 ### Adapters (`src/adapters`)
 
@@ -39,11 +40,12 @@ No outward dependency should leak into `domain` or use cases.
   - `MLDInMemoryFeatureTransportAdapter`
 - Inbound CLI adapter:
   - `MLDCliApplication`
+  - Includes `t50` mapping utilities (`backlight-*`, `opcode-scan`, `dpi/polling/lod/color-probe`)
 
 ## Extension Path
 
-1. Capture T50 feature-report map with `feature-get`/`feature-set` and encode stable packet types.
-2. Add Bloody HID protocol packet encoding/decoding in `MLDIOKitFeatureTransportAdapter`.
-3. Wire known packet encoders to `MLDApplyPerformanceProfileUseCase`.
+1. Use `t50 opcode-scan` and `t50 *-probe` to identify stable opcodes/offsets for DPI/polling/LOD/color.
+2. Promote validated probes into stable named `t50` commands with fixed encoding contracts.
+3. Wire validated DPI/polling/LOD mappings into `MLDApplyPerformanceProfileUseCase`.
 4. Keep protocol constants and codec logic adapter-local unless they represent a domain concept.
 5. Add integration tests for adapter behavior while keeping unit tests on use-case/domain rules.

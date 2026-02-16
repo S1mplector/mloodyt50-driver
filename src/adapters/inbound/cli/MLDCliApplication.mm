@@ -491,6 +491,8 @@
     printf("  t50 command-read --opcode <n> [--flag <n>] [--offset <n>] [--data <hex>] [selectors]\n");
     printf("  t50 command-write --opcode <n> --data <hex> [--flag <n>] [--offset <n>] [selectors]\n");
     printf("  t50 opcode-scan [--from <n>] [--to <n>] [--flag <n>] [--offset <n>] [--data <hex>] [selectors]\n");
+    printf("  t50 capture --file <path> [--from <n>] [--to <n>] [--flag <n>] [--offset <n>] [--data <hex>] [selectors]\n");
+    printf("  t50 capture-diff --before <path> --after <path>\n");
     printf("  t50 dpi-probe --opcode <n> --dpi <n> [--flag <n>] [--offset <n>] [selectors]\n");
     printf("  t50 polling-probe --opcode <n> --hz <n> [--flag <n>] [--offset <n>] [selectors]\n");
     printf("  t50 lod-probe --opcode <n> --lod <n> [--flag <n>] [--offset <n>] [selectors]\n");
@@ -522,6 +524,12 @@
     }
     if ([subcommand isEqualToString:@"opcode-scan"]) {
         return [self runT50OpcodeScanWithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"capture"]) {
+        return [self runT50CaptureWithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"capture-diff"]) {
+        return [self runT50CaptureDiffWithArguments:subArguments];
     }
     if ([subcommand isEqualToString:@"dpi-probe"]) {
         return [self runT50DPIProbeWithArguments:subArguments];
@@ -847,6 +855,267 @@
     printf("t50 opcode-scan done success=%lu total=%lu\n",
            (unsigned long)successCount,
            (unsigned long)(to - from + 1));
+    return 0;
+}
+
+- (int)runT50CaptureWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[
+        @"--file", @"--from", @"--to", @"--flag", @"--offset", @"--data", @"--vid", @"--pid", @"--serial", @"--model"
+    ]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *filePath = options[@"--file"];
+    if (filePath == nil || filePath.length == 0) {
+        fprintf(stderr, "t50 capture requires --file <path>.\n");
+        return 1;
+    }
+
+    NSUInteger from = 16;
+    NSUInteger to = 48;
+    NSUInteger flag = 0x00;
+    NSUInteger offset = 8;
+    if (![self parseOptionalUnsigned:options[@"--from"] maxValue:255 fieldName:@"--from" output:&from errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--to"] maxValue:255 fieldName:@"--to" output:&to errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--flag"] maxValue:255 fieldName:@"--flag" output:&flag errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--offset"] maxValue:71 fieldName:@"--offset" output:&offset errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+    if (from > to) {
+        fprintf(stderr, "Option '--from' must be <= '--to'.\n");
+        return 1;
+    }
+
+    NSData *payload = [NSData data];
+    NSString *dataString = options[@"--data"];
+    if (dataString != nil) {
+        payload = [self dataFromHexInput:dataString errorMessage:&parseError];
+        if (payload == nil) {
+            fprintf(stderr, "%s\n", parseError.UTF8String);
+            return 1;
+        }
+    }
+
+    MLDMouseDevice *target = [self selectT50DeviceWithOptions:options errorMessage:&parseError];
+    if (target == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSMutableArray<NSDictionary *> *entries = [NSMutableArray array];
+    NSUInteger successCount = 0;
+    for (NSUInteger opcode = from; opcode <= to; ++opcode) {
+        NSError *exchangeError = nil;
+        NSData *response = [self.t50ExchangeCommandUseCase executeForDevice:target
+                                                                      opcode:(uint8_t)opcode
+                                                                   writeFlag:(uint8_t)flag
+                                                               payloadOffset:offset
+                                                                     payload:payload
+                                                                       error:&exchangeError];
+        if (response == nil) {
+            [entries addObject:@{
+                @"opcode" : @(opcode),
+                @"error" : exchangeError.localizedDescription ?: @"Unknown exchange error"
+            }];
+            continue;
+        }
+
+        [entries addObject:@{
+            @"opcode" : @(opcode),
+            @"response_hex" : [self hexStringFromData:response]
+        }];
+        successCount += 1;
+    }
+
+    NSDictionary *capture = @{
+        @"timestamp_unix" : @([[NSDate date] timeIntervalSince1970]),
+        @"device" : @{
+            @"vendor_id" : @(target.vendorID),
+            @"product_id" : @(target.productID),
+            @"location_id" : @(target.locationID),
+            @"model" : target.modelName,
+            @"serial" : target.serialNumber
+        },
+        @"request" : @{
+            @"from_opcode" : @(from),
+            @"to_opcode" : @(to),
+            @"flag" : @(flag),
+            @"offset" : @(offset),
+            @"payload_hex" : [self hexStringFromData:payload]
+        },
+        @"entries" : entries
+    };
+
+    NSError *jsonError = nil;
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:capture options:NSJSONWritingPrettyPrinted error:&jsonError];
+    if (jsonData == nil) {
+        fprintf(stderr, "Failed to encode capture JSON: %s\n", jsonError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    BOOL writeOK = [jsonData writeToFile:filePath options:NSDataWritingAtomic error:&jsonError];
+    if (!writeOK) {
+        fprintf(stderr, "Failed to write capture file: %s\n", jsonError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    printf("t50 capture saved file=%s success=%lu total=%lu\n",
+           filePath.UTF8String,
+           (unsigned long)successCount,
+           (unsigned long)(to - from + 1));
+    return 0;
+}
+
+- (int)runT50CaptureDiffWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[@"--before", @"--after"]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *beforePath = options[@"--before"];
+    NSString *afterPath = options[@"--after"];
+    if (beforePath == nil || afterPath == nil) {
+        fprintf(stderr, "t50 capture-diff requires --before <path> and --after <path>.\n");
+        return 1;
+    }
+
+    NSError *beforeReadError = nil;
+    NSError *afterReadError = nil;
+    NSData *beforeData = [NSData dataWithContentsOfFile:beforePath options:0 error:&beforeReadError];
+    NSData *afterData = [NSData dataWithContentsOfFile:afterPath options:0 error:&afterReadError];
+    if (beforeData == nil) {
+        fprintf(stderr, "Failed to read --before file: %s\n", beforeReadError.localizedDescription.UTF8String);
+        return 1;
+    }
+    if (afterData == nil) {
+        fprintf(stderr, "Failed to read --after file: %s\n", afterReadError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    NSError *beforeJSONError = nil;
+    NSError *afterJSONError = nil;
+    NSDictionary *beforeJSON = [NSJSONSerialization JSONObjectWithData:beforeData options:0 error:&beforeJSONError];
+    NSDictionary *afterJSON = [NSJSONSerialization JSONObjectWithData:afterData options:0 error:&afterJSONError];
+    if (![beforeJSON isKindOfClass:[NSDictionary class]]) {
+        fprintf(stderr, "Invalid JSON in --before file: %s\n", beforeJSONError.localizedDescription.UTF8String);
+        return 1;
+    }
+    if (![afterJSON isKindOfClass:[NSDictionary class]]) {
+        fprintf(stderr, "Invalid JSON in --after file: %s\n", afterJSONError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    NSArray *beforeEntries = beforeJSON[@"entries"];
+    NSArray *afterEntries = afterJSON[@"entries"];
+    if (![beforeEntries isKindOfClass:[NSArray class]] || ![afterEntries isKindOfClass:[NSArray class]]) {
+        fprintf(stderr, "Capture files are missing 'entries' arrays.\n");
+        return 1;
+    }
+
+    NSMutableDictionary<NSNumber *, NSDictionary *> *beforeByOpcode = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSNumber *, NSDictionary *> *afterByOpcode = [NSMutableDictionary dictionary];
+    for (NSDictionary *entry in beforeEntries) {
+        if ([entry isKindOfClass:[NSDictionary class]] && entry[@"opcode"] != nil) {
+            beforeByOpcode[entry[@"opcode"]] = entry;
+        }
+    }
+    for (NSDictionary *entry in afterEntries) {
+        if ([entry isKindOfClass:[NSDictionary class]] && entry[@"opcode"] != nil) {
+            afterByOpcode[entry[@"opcode"]] = entry;
+        }
+    }
+
+    printf("t50 capture-diff before=%s after=%s\n", beforePath.UTF8String, afterPath.UTF8String);
+
+    NSUInteger changeCount = 0;
+    for (NSUInteger opcode = 0; opcode <= 255; ++opcode) {
+        NSDictionary *beforeEntry = beforeByOpcode[@(opcode)];
+        NSDictionary *afterEntry = afterByOpcode[@(opcode)];
+        if (beforeEntry == nil && afterEntry == nil) {
+            continue;
+        }
+
+        NSString *beforeHex = beforeEntry[@"response_hex"];
+        NSString *afterHex = afterEntry[@"response_hex"];
+        NSString *beforeErr = beforeEntry[@"error"];
+        NSString *afterErr = afterEntry[@"error"];
+
+        BOOL different = NO;
+        if ((beforeHex == nil) != (afterHex == nil)) {
+            different = YES;
+        } else if (beforeHex != nil && ![beforeHex isEqualToString:afterHex]) {
+            different = YES;
+        }
+        if ((beforeErr == nil) != (afterErr == nil)) {
+            different = YES;
+        } else if (beforeErr != nil && ![beforeErr isEqualToString:afterErr]) {
+            different = YES;
+        }
+
+        if (!different) {
+            continue;
+        }
+
+        changeCount += 1;
+        if (beforeHex != nil && afterHex != nil) {
+            NSString *hexParseError = nil;
+            NSData *beforeBytes = [self dataFromHexInput:beforeHex errorMessage:&hexParseError];
+            NSData *afterBytes = [self dataFromHexInput:afterHex errorMessage:&hexParseError];
+            if (beforeBytes != nil && afterBytes != nil) {
+                const uint8_t *lhs = (const uint8_t *)beforeBytes.bytes;
+                const uint8_t *rhs = (const uint8_t *)afterBytes.bytes;
+                NSUInteger minLen = MIN(beforeBytes.length, afterBytes.length);
+                NSMutableArray<NSString *> *segments = [NSMutableArray array];
+                for (NSUInteger i = 0; i < minLen; ++i) {
+                    if (lhs[i] != rhs[i]) {
+                        [segments addObject:[NSString stringWithFormat:@"%lu:%02x->%02x",
+                                             (unsigned long)i,
+                                             lhs[i],
+                                             rhs[i]]];
+                    }
+                    if (segments.count == 8) {
+                        break;
+                    }
+                }
+                if (beforeBytes.length != afterBytes.length) {
+                    [segments addObject:[NSString stringWithFormat:@"len:%lu->%lu",
+                                         (unsigned long)beforeBytes.length,
+                                         (unsigned long)afterBytes.length]];
+                }
+
+                NSString *segmentString = segments.count > 0 ? [segments componentsJoinedByString:@", "] : @"content-changed";
+                printf("  opcode=0x%02lx changed %s\n", (unsigned long)opcode, segmentString.UTF8String);
+                continue;
+            }
+        }
+
+        printf("  opcode=0x%02lx changed (non-hex or error state)\n", (unsigned long)opcode);
+    }
+
+    if (changeCount == 0) {
+        printf("  no opcode changes detected.\n");
+    } else {
+        printf("  changed_opcodes=%lu\n", (unsigned long)changeCount);
+    }
+
     return 0;
 }
 
