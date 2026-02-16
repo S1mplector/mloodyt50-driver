@@ -1,8 +1,10 @@
 # mloody
 
-`mloody` is an Objective-C macOS project scaffold for building a Bloody T50 mouse driver for macOS. 
+`mloody` is a Bloody T50 mouse (LK) driver for macOS. 
 
-The repository is intentionally layered so core behavior stays decoupled from macOS-specific I/O and transport details.
+Upon request, I can reverse engineer other mice and make macOS drivers as well. Contact me on mehmetogluilgaz07@gmail.com.
+
+I intentionally layered the repository hexagonally so core behavior is decoupled from macOS-specific I/O and transport details.
 
 ## Build
 
