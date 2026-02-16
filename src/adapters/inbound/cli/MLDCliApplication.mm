@@ -1621,7 +1621,7 @@
     NSUInteger blue = 0;
     NSUInteger slots = 20;
     NSUInteger slot = 0;
-    NSUInteger prepareValue = 1;
+    NSUInteger prepareValue = 0;
     NSUInteger saveValue = 1;
     if (![self parseRequiredUnsigned:rString maxValue:255 fieldName:@"--r" output:&red errorMessage:&parseError] ||
         ![self parseRequiredUnsigned:gString maxValue:255 fieldName:@"--g" output:&green errorMessage:&parseError] ||
@@ -1756,7 +1756,7 @@
     NSUInteger red = 0;
     NSUInteger green = 0;
     NSUInteger blue = 0;
-    NSUInteger prepareValue = 1;
+    NSUInteger prepareValue = 0;
     NSUInteger saveValue = 0;
     if (![self parseRequiredUnsigned:rString maxValue:255 fieldName:@"--r" output:&red errorMessage:&parseError] ||
         ![self parseRequiredUnsigned:gString maxValue:255 fieldName:@"--g" output:&green errorMessage:&parseError] ||

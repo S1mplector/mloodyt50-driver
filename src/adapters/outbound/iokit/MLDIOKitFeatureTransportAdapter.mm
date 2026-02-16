@@ -58,6 +58,25 @@ static BOOL MLDMatchesTargetDevice(IOHIDDeviceRef deviceRef, MLDMouseDevice *tar
     return YES;
 }
 
+static NSUInteger MLDFeatureTransportScore(IOHIDDeviceRef deviceRef) {
+    NSNumber *featureSize = (__bridge NSNumber *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDMaxFeatureReportSizeKey));
+    NSNumber *outputSize = (__bridge NSNumber *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDMaxOutputReportSizeKey));
+    NSNumber *inputSize = (__bridge NSNumber *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDMaxInputReportSizeKey));
+
+    // Prefer interfaces that actually expose feature reports, then larger output/input capacity.
+    NSUInteger score = 0;
+    if (featureSize != nil) {
+        score += (featureSize.unsignedIntegerValue << 16);
+    }
+    if (outputSize != nil) {
+        score += (outputSize.unsignedIntegerValue << 8);
+    }
+    if (inputSize != nil) {
+        score += inputSize.unsignedIntegerValue;
+    }
+    return score;
+}
+
 @interface MLDIOKitFeatureTransportAdapter ()
 
 - (nullable IOHIDDeviceRef)copyDeviceRefForDevice:(MLDMouseDevice *)device error:(NSError **)error;
@@ -95,15 +114,22 @@ static BOOL MLDMatchesTargetDevice(IOHIDDeviceRef deviceRef, MLDMouseDevice *tar
     }
 
     IOHIDDeviceRef selected = NULL;
+    NSUInteger selectedScore = 0;
     CFSetRef devicesRef = IOHIDManagerCopyDevices(manager);
     if (devicesRef != NULL) {
         NSArray *allDevices = [(__bridge NSSet *)devicesRef allObjects];
         for (id object in allDevices) {
             IOHIDDeviceRef candidate = (__bridge IOHIDDeviceRef)object;
             if (MLDMatchesTargetDevice(candidate, device)) {
-                selected = candidate;
-                CFRetain(selected);
-                break;
+                NSUInteger score = MLDFeatureTransportScore(candidate);
+                if (selected == NULL || score > selectedScore) {
+                    if (selected != NULL) {
+                        CFRelease(selected);
+                    }
+                    selected = candidate;
+                    selectedScore = score;
+                    CFRetain(selected);
+                }
             }
         }
         CFRelease(devicesRef);

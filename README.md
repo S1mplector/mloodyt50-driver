@@ -89,7 +89,7 @@ Available tools:
 
 `dpi-probe`/`polling-probe`/`lod-probe`/`color-probe` are mapping helpers; they are intentionally explicit about opcode so you can test and confirm behavior on your own device before we lock in stable named mappings.
 `color-mode` sends captured menu/mode transitions (`open`, `constant`, `discard`) over `opcode 0x03`.
-`color-direct`/`color-zone` now default to `--prepare 1`, which runs a captured preamble (`open` + `constant`) before RGB payload writes; disable with `--prepare 0` for raw probing.
+`color-direct`/`color-zone` now default to `--prepare 0` to avoid unintended mode transitions. Use `--prepare 1` to run the captured preamble (`open` + `0x00 0x02`) before RGB payload writes while probing.
 `color-zone` is a safer named wrapper around `color-direct` for common targets (`logo`, `wheel`, `rear`, `all`) and defaults to `--save 0` during RE.
 Current mapping hypothesis for T50/W70-style packets: `logo=slot 8`, `wheel=slot 15`, `rear=slots 1-7,9-14`, `all=slots 1-15`.
 `core-get` decodes from `opcode 0x1f` (`word @ payload[2..3]`, core = `(word & 0x3) + 1`), and `core-state` prints raw decode fields for RE.
