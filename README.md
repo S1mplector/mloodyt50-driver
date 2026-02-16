@@ -1,6 +1,6 @@
-# mloody
+# mloodyt50-driver
 
-`mloody` is a Bloody T50 mouse (LK) driver for macOS. 
+`mloodyt50-driver` is a Bloody T50 mouse (LK) driver for macOS. 
 
 Upon request, I can reverse engineer other mice and make macOS drivers as well. Contact me on mehmetogluilgaz07@gmail.com.
 
