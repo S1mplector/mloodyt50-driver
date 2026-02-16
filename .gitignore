@@ -16,5 +16,5 @@ Makefile
 *.swp
 *.tmp
 
-# Reverse engineering workspace
+# Reverse engineering
 tmp/
