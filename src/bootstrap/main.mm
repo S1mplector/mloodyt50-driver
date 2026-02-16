@@ -5,6 +5,8 @@
 #import "adapters/outbound/iokit/MLDIOKitFeatureTransportAdapter.h"
 #import "application/use_cases/MLDApplyPerformanceProfileUseCase.h"
 #import "application/use_cases/MLDDiscoverSupportedDevicesUseCase.h"
+#import "application/use_cases/MLDReadFeatureReportUseCase.h"
+#import "application/use_cases/MLDWriteFeatureReportUseCase.h"
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
@@ -15,9 +17,15 @@ int main(int argc, const char *argv[]) {
             [[MLDDiscoverSupportedDevicesUseCase alloc] initWithDiscoveryPort:discoveryAdapter];
         MLDApplyPerformanceProfileUseCase *applyUseCase =
             [[MLDApplyPerformanceProfileUseCase alloc] initWithFeatureTransportPort:featureAdapter];
+        MLDWriteFeatureReportUseCase *writeFeatureUseCase =
+            [[MLDWriteFeatureReportUseCase alloc] initWithFeatureTransportPort:featureAdapter];
+        MLDReadFeatureReportUseCase *readFeatureUseCase =
+            [[MLDReadFeatureReportUseCase alloc] initWithFeatureTransportPort:featureAdapter];
 
         MLDCliApplication *app = [[MLDCliApplication alloc] initWithDiscoverUseCase:discoverUseCase
-                                                                 applyProfileUseCase:applyUseCase];
+                                                                 applyProfileUseCase:applyUseCase
+                                                         writeFeatureReportUseCase:writeFeatureUseCase
+                                                          readFeatureReportUseCase:readFeatureUseCase];
         return [app runWithArgc:argc argv:argv];
     }
 }

@@ -31,10 +31,27 @@ ctest --test-dir build --output-on-failure
 
 ```bash
 ./build/mloody list
-./build/mloody apply --dpi 1600 --polling 1000 --lod 2
+./build/mloody probe
+./build/mloody feature-set --report-id 0x07 --data "11 22 33"
+./build/mloody feature-get --report-id 0x07 --length 16
+./build/mloody feature-scan --from 0x01 --to 0x10 --length 16
 ```
 
-`list` uses the IOKit discovery adapter. `apply` routes through the application use case and currently fails with a clear message because Bloody-specific feature report protocol mapping is not yet implemented.
+Commands default to T50-first selection when no explicit selector is provided.
+T50 detection uses model-name matching (`T50`) and a known T50 product ID (`0x7F8D`).
+
+- `list`: list supported Bloody devices with T50 flag.
+- `probe`: select and print target device details (supports `--vid`, `--pid`, `--serial`, `--model`).
+- `feature-set`: send a raw HID feature report payload.
+- `feature-get`: read a raw HID feature report payload.
+- `feature-scan`: sweep a report-id range and dump readable feature reports.
+- `apply`: profile-intent use case placeholder; T50 packet mapping is still pending.
+
+Selectors can be added to `apply`, `feature-set`, and `feature-get`:
+
+```bash
+./build/mloody feature-get --report-id 0x02 --length 32 --vid 0x09da --model T50
+```
 
 ## Notes for Real Driver Work
 

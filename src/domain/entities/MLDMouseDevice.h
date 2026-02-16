@@ -7,11 +7,18 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property(nonatomic, assign, readonly) uint16_t vendorID;
 @property(nonatomic, assign, readonly) uint16_t productID;
+@property(nonatomic, assign, readonly) uint32_t locationID;
 @property(nonatomic, copy, readonly) NSString *modelName;
 @property(nonatomic, copy, readonly) NSString *serialNumber;
 
 - (instancetype)initWithVendorID:(uint16_t)vendorID
                        productID:(uint16_t)productID
+                       modelName:(NSString *)modelName
+                    serialNumber:(NSString *)serialNumber;
+
+- (instancetype)initWithVendorID:(uint16_t)vendorID
+                       productID:(uint16_t)productID
+                      locationID:(uint32_t)locationID
                        modelName:(NSString *)modelName
                     serialNumber:(NSString *)serialNumber NS_DESIGNATED_INITIALIZER;
 

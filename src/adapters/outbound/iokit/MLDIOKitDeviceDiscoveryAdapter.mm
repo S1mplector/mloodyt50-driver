@@ -59,6 +59,7 @@ static NSString *const MLDIOKitDiscoveryErrorDomain = @"com.mloody.adapters.ioki
 
         NSString *productName = (__bridge NSString *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDProductKey));
         NSString *serial = (__bridge NSString *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDSerialNumberKey));
+        NSNumber *locationNumber = (__bridge NSNumber *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDLocationIDKey));
 
         if (productName.length == 0) {
             productName = @"Unknown Mouse";
@@ -67,8 +68,14 @@ static NSString *const MLDIOKitDiscoveryErrorDomain = @"com.mloody.adapters.ioki
             serial = @"";
         }
 
+        uint32_t locationID = 0;
+        if (locationNumber != nil) {
+            locationID = locationNumber.unsignedIntValue;
+        }
+
         MLDMouseDevice *device = [[MLDMouseDevice alloc] initWithVendorID:(uint16_t)vendorNumber.unsignedShortValue
                                                                  productID:(uint16_t)productNumber.unsignedShortValue
+                                                                locationID:locationID
                                                                  modelName:productName
                                                               serialNumber:serial];
         [devices addObject:device];

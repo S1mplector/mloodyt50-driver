@@ -24,6 +24,8 @@ target_link_libraries(mloody_domain PUBLIC ${FOUNDATION_FRAMEWORK})
 add_library(mloody_application STATIC
     src/application/use_cases/MLDDiscoverSupportedDevicesUseCase.m
     src/application/use_cases/MLDApplyPerformanceProfileUseCase.m
+    src/application/use_cases/MLDWriteFeatureReportUseCase.m
+    src/application/use_cases/MLDReadFeatureReportUseCase.m
 )
 target_include_directories(mloody_application PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_compile_options(mloody_application PRIVATE -fobjc-arc)
@@ -86,4 +88,22 @@ if(MLOODY_BUILD_TESTS)
         ${FOUNDATION_FRAMEWORK}
     )
     add_test(NAME apply_profile_tests COMMAND apply_profile_tests)
+
+    add_executable(raw_feature_control_tests tests/unit/RawFeatureControlTests.mm)
+    target_compile_options(raw_feature_control_tests PRIVATE -fobjc-arc)
+    target_link_libraries(raw_feature_control_tests PRIVATE
+        mloody_adapters_memory
+        mloody_application
+        mloody_domain
+        ${FOUNDATION_FRAMEWORK}
+    )
+    add_test(NAME raw_feature_control_tests COMMAND raw_feature_control_tests)
+
+    add_executable(supported_device_catalog_tests tests/unit/SupportedDeviceCatalogTests.mm)
+    target_compile_options(supported_device_catalog_tests PRIVATE -fobjc-arc)
+    target_link_libraries(supported_device_catalog_tests PRIVATE
+        mloody_domain
+        ${FOUNDATION_FRAMEWORK}
+    )
+    add_test(NAME supported_device_catalog_tests COMMAND supported_device_catalog_tests)
 endif()

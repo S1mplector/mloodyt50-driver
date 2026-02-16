@@ -2,13 +2,17 @@
 
 @class MLDApplyPerformanceProfileUseCase;
 @class MLDDiscoverSupportedDevicesUseCase;
+@class MLDReadFeatureReportUseCase;
+@class MLDWriteFeatureReportUseCase;
 
 NS_ASSUME_NONNULL_BEGIN
 
 @interface MLDCliApplication : NSObject
 
 - (instancetype)initWithDiscoverUseCase:(MLDDiscoverSupportedDevicesUseCase *)discoverUseCase
-                    applyProfileUseCase:(MLDApplyPerformanceProfileUseCase *)applyProfileUseCase NS_DESIGNATED_INITIALIZER;
+                    applyProfileUseCase:(MLDApplyPerformanceProfileUseCase *)applyProfileUseCase
+            writeFeatureReportUseCase:(MLDWriteFeatureReportUseCase *)writeFeatureReportUseCase
+             readFeatureReportUseCase:(MLDReadFeatureReportUseCase *)readFeatureReportUseCase NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
 

@@ -26,6 +26,8 @@ No outward dependency should leak into `domain` or use cases.
 - `ports/MLDFeatureTransportPort`: Output abstraction for feature report transport.
 - `MLDDiscoverSupportedDevicesUseCase`: Enumerates + filters supported devices.
 - `MLDApplyPerformanceProfileUseCase`: Validates profile then sends through port.
+- `MLDWriteFeatureReportUseCase`: Raw feature-report write path for direct device control.
+- `MLDReadFeatureReportUseCase`: Raw feature-report read path for device introspection.
 
 ### Adapters (`src/adapters`)
 
@@ -40,6 +42,8 @@ No outward dependency should leak into `domain` or use cases.
 
 ## Extension Path
 
-1. Add Bloody HID protocol packet encoding/decoding in `MLDIOKitFeatureTransportAdapter`.
-2. Keep protocol constants and codec logic adapter-local unless they represent a domain concept.
-3. Add integration tests for adapter behavior while keeping unit tests on use-case/domain rules.
+1. Capture T50 feature-report map with `feature-get`/`feature-set` and encode stable packet types.
+2. Add Bloody HID protocol packet encoding/decoding in `MLDIOKitFeatureTransportAdapter`.
+3. Wire known packet encoders to `MLDApplyPerformanceProfileUseCase`.
+4. Keep protocol constants and codec logic adapter-local unless they represent a domain concept.
+5. Add integration tests for adapter behavior while keeping unit tests on use-case/domain rules.
