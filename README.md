@@ -1,4 +1,4 @@
-# mloodyt50-driver
+# mloodyt50-IOHID-ct
 
 `mloodyt50-driver` is a Bloody T50 mouse (LK) user-space (IOHID) control tool for macOS.
 Just for clarification, as it is not a kernel extension, it is not a "driver" in the traditional sense. 
