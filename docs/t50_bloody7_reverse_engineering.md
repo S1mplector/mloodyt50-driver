@@ -94,6 +94,17 @@ These are now first-class CLI utilities (`flash-read8`, `flash-read32`, `flash-w
 - Repeated DPI changes (`dpi-set` + `save` with `capture-v4`) did not alter coarse flash-read snapshots (`0x0000..0xff00`, step `0x100`) nor the targeted `0x1c00..0x2fff` step `0x10` scan.
 - Current inference: existing `dpi-step`/`dpi-set` path is runtime-only for T50 and does not yet execute the full Bloody7 table+checksum flash update sequence.
 
+## New Static RE Utility
+
+- `tools/re/bloody7_adjustgun_map.py` extracts callsites to `Hid_flash` primitives and groups per-function primitive sequences.
+- This is intended to isolate the exact `Iom_adjustgun` persistence path from generic lighting/config flows.
+- Example:
+
+```bash
+python3 tools/re/bloody7_adjustgun_map.py \
+  --json-out tmp/captures/bloody7_adjustgun_map.json
+```
+
 ## Static Firmware/MCU Inference
 
 From UTF-16 string clusters in `Bloody7.exe`:

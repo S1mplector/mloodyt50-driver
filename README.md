@@ -55,6 +55,8 @@ ctest --test-dir build --output-on-failure
 ./build/mloody t50 flash-write16 --addr 0x1c00 --data "34 12 78 56" --verify 1 --unsafe 1
 ./build/mloody t50 flash-write32 --addr 0x2e00 --data "78 56 34 12" --unsafe 1
 ./build/mloody t50 flash-scan8 --from 0x1c00 --to 0x2f00 --step 0x100 --nonzero-only 1
+./build/mloody t50 flash-capture --file tmp/captures/flash_before.json --from 0x0000 --to 0xffff --step 0x0100 --nonzero-only 1
+./build/mloody t50 flash-diff --before tmp/captures/flash_before.json --after tmp/captures/flash_after.json
 ./build/mloody t50 dpi-set --dpi 1600 --save 1 --strategy capture-v3
 ./build/mloody t50 dpi-step --action up --count 2
 ./build/mloody t50 dpi-step --action down --save 1 --strategy capture-v3
@@ -122,6 +124,8 @@ Available tools:
 ./build/mloody t50 flash-read8 --addr 0x1c00
 ./build/mloody t50 flash-read32 --addr 0x2e00 --count 1
 ./build/mloody t50 flash-scan8 --from 0x0000 --to 0xffff --step 0x0100 --nonzero-only 1
+./build/mloody t50 flash-capture --file tmp/captures/flash_before.json --from 0x0000 --to 0xffff --step 0x0100 --nonzero-only 1
+./build/mloody t50 flash-diff --before tmp/captures/flash_before.json --after tmp/captures/flash_after.json
 ```
 
 `dpi-set` targets a requested DPI using the default ladder (`400, 800, 1200, 1600, 2000, 3200, 4000`) by calibrating downward first and then stepping up; it defaults to persistence mode (`--save 1`, strategy `capture-v3`) so settings survive replug/restart.
@@ -145,6 +149,8 @@ Current mapping hypothesis for T50 packets: `logo=slot 15`, `wheel=slots 7,8,21`
 `t50 save` is an experimental persistence helper with strategies `quick`, `capture-v1`, `capture-v2`, `capture-v3`, `capture-v4`, and `major-sync`.
 `flash-read8` and `flash-read32` expose low-level `0x2f` flash bridge reads discovered in static RE.
 `flash-scan8` is a read-only mapper for finding nonzero flash windows quickly.
+`flash-capture` writes a JSON snapshot of `flash-read8` sweep results for reproducible before/after persistence experiments.
+`flash-diff` compares two `flash-capture` files and prints changed addresses with byte-level deltas.
 `flash-write16` and `flash-write32` expose invasive write primitives and require `--unsafe 1`.
 `capture-v2` mirrors only the observed Windows "OK/save" tail (`03 03 0b 00`, `14`, `05`, `2f`, `0e`, `0f`, `0c`, `0a`).
 `capture-v3` replays the fuller traced flow (warmup `03 06 05/06/02`, brightness menu open `03 03 0b 01`, brightness ramp `11:0..3` with `0a` ticks, then the same tail plus `03 06 05/06`) and remains the baseline persistence strategy.

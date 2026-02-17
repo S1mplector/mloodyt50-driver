@@ -511,6 +511,8 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
     printf("  t50 flash-write16 --addr <n> --data <hex> [--verify <0|1>] --unsafe <0|1> [selectors]\n");
     printf("  t50 flash-write32 --addr <n> --data <hex> --unsafe <0|1> [selectors]\n");
     printf("  t50 flash-scan8 --from <n> --to <n> [--step <n>] [--nonzero-only <0|1>] [selectors]\n");
+    printf("  t50 flash-capture --file <path> [--from <n>] [--to <n>] [--step <n>] [--nonzero-only <0|1>] [selectors]\n");
+    printf("  t50 flash-diff --before <path> --after <path>\n");
     printf("  t50 opcode-scan [--from <n>] [--to <n>] [--flag <n>] [--offset <n>] [--data <hex>] [selectors]\n");
     printf("  t50 capture --file <path> [--from <n>] [--to <n>] [--flag <n>] [--offset <n>] [--data <hex>] [selectors]\n");
     printf("  t50 capture-diff --before <path> --after <path>\n");
@@ -594,6 +596,12 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
     }
     if ([subcommand isEqualToString:@"flash-scan8"]) {
         return [self runT50FlashScan8WithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"flash-capture"]) {
+        return [self runT50FlashCaptureWithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"flash-diff"]) {
+        return [self runT50FlashDiffWithArguments:subArguments];
     }
     if ([subcommand isEqualToString:@"opcode-scan"]) {
         return [self runT50OpcodeScanWithArguments:subArguments];
@@ -1940,6 +1948,288 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
     printf("t50 flash-scan8 done success=%lu printed=%lu\n",
            (unsigned long)successCount,
            (unsigned long)printedCount);
+    return 0;
+}
+
+- (int)runT50FlashCaptureWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[
+        @"--file", @"--from", @"--to", @"--step", @"--nonzero-only", @"--vid", @"--pid", @"--serial", @"--model"
+    ]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *filePath = options[@"--file"];
+    if (filePath == nil || filePath.length == 0) {
+        fprintf(stderr, "t50 flash-capture requires --file <path>.\n");
+        return 1;
+    }
+
+    NSUInteger fromValue = 0;
+    NSUInteger toValue = 0xFFFF;
+    NSUInteger stepValue = 0x0100;
+    NSUInteger nonzeroOnlyValue = 1;
+    if (![self parseOptionalUnsigned:options[@"--from"] maxValue:0xFFFF fieldName:@"--from" output:&fromValue errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--to"] maxValue:0xFFFF fieldName:@"--to" output:&toValue errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--step"] maxValue:0xFFFF fieldName:@"--step" output:&stepValue errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--nonzero-only"] maxValue:1 fieldName:@"--nonzero-only" output:&nonzeroOnlyValue errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+    if (fromValue > toValue) {
+        fprintf(stderr, "t50 flash-capture requires --from <= --to.\n");
+        return 1;
+    }
+    if (stepValue == 0) {
+        fprintf(stderr, "t50 flash-capture --step must be >= 1.\n");
+        return 1;
+    }
+
+    MLDMouseDevice *target = [self selectT50DeviceWithOptions:options errorMessage:&parseError];
+    if (target == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSMutableArray<NSDictionary *> *entries = [NSMutableArray array];
+    NSUInteger successCount = 0;
+    for (NSUInteger address = fromValue; address <= toValue; ) {
+        NSError *flashError = nil;
+        NSData *bytes = [self.t50ExchangeCommandUseCase readFlashBytes8FromAddress:(uint16_t)address
+                                                                           onDevice:target
+                                                                              error:&flashError];
+        if (bytes == nil) {
+            [entries addObject:@{
+                @"addr" : @(address),
+                @"error" : flashError.localizedDescription ?: @"Unknown flash read error"
+            }];
+        } else {
+            successCount += 1;
+            const uint8_t *raw = (const uint8_t *)bytes.bytes;
+            BOOL allZero = YES;
+            for (NSUInteger i = 0; i < bytes.length; ++i) {
+                if (raw[i] != 0x00) {
+                    allZero = NO;
+                    break;
+                }
+            }
+            if (!(nonzeroOnlyValue == 1 && allZero)) {
+                [entries addObject:@{
+                    @"addr" : @(address),
+                    @"data_hex" : [self hexStringFromData:bytes]
+                }];
+            }
+        }
+
+        if (address > (NSUIntegerMax - stepValue)) {
+            break;
+        }
+        NSUInteger next = address + stepValue;
+        if (next <= address) {
+            break;
+        }
+        address = next;
+    }
+
+    NSDictionary *capture = @{
+        @"timestamp_unix" : @([[NSDate date] timeIntervalSince1970]),
+        @"device" : @{
+            @"vendor_id" : @(target.vendorID),
+            @"product_id" : @(target.productID),
+            @"location_id" : @(target.locationID),
+            @"model" : target.modelName,
+            @"serial" : target.serialNumber
+        },
+        @"request" : @{
+            @"from_addr" : @(fromValue),
+            @"to_addr" : @(toValue),
+            @"step" : @(stepValue),
+            @"nonzero_only" : @(nonzeroOnlyValue)
+        },
+        @"summary" : @{
+            @"success_reads" : @(successCount),
+            @"entry_count" : @(entries.count)
+        },
+        @"entries" : entries
+    };
+
+    NSError *jsonError = nil;
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:capture options:NSJSONWritingPrettyPrinted error:&jsonError];
+    if (jsonData == nil) {
+        fprintf(stderr, "Failed to encode flash capture JSON: %s\n", jsonError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    BOOL writeOK = [jsonData writeToFile:filePath options:NSDataWritingAtomic error:&jsonError];
+    if (!writeOK) {
+        fprintf(stderr, "Failed to write flash capture file: %s\n", jsonError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    printf("t50 flash-capture saved file=%s success=%lu entries=%lu\n",
+           filePath.UTF8String,
+           (unsigned long)successCount,
+           (unsigned long)entries.count);
+    return 0;
+}
+
+- (int)runT50FlashDiffWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[@"--before", @"--after"]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *beforePath = options[@"--before"];
+    NSString *afterPath = options[@"--after"];
+    if (beforePath == nil || afterPath == nil) {
+        fprintf(stderr, "t50 flash-diff requires --before <path> and --after <path>.\n");
+        return 1;
+    }
+
+    NSError *beforeReadError = nil;
+    NSError *afterReadError = nil;
+    NSData *beforeData = [NSData dataWithContentsOfFile:beforePath options:0 error:&beforeReadError];
+    NSData *afterData = [NSData dataWithContentsOfFile:afterPath options:0 error:&afterReadError];
+    if (beforeData == nil) {
+        fprintf(stderr, "Failed to read --before file: %s\n", beforeReadError.localizedDescription.UTF8String);
+        return 1;
+    }
+    if (afterData == nil) {
+        fprintf(stderr, "Failed to read --after file: %s\n", afterReadError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    NSError *beforeJSONError = nil;
+    NSError *afterJSONError = nil;
+    NSDictionary *beforeJSON = [NSJSONSerialization JSONObjectWithData:beforeData options:0 error:&beforeJSONError];
+    NSDictionary *afterJSON = [NSJSONSerialization JSONObjectWithData:afterData options:0 error:&afterJSONError];
+    if (![beforeJSON isKindOfClass:[NSDictionary class]]) {
+        fprintf(stderr, "Invalid JSON in --before file: %s\n", beforeJSONError.localizedDescription.UTF8String);
+        return 1;
+    }
+    if (![afterJSON isKindOfClass:[NSDictionary class]]) {
+        fprintf(stderr, "Invalid JSON in --after file: %s\n", afterJSONError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    NSArray *beforeEntries = beforeJSON[@"entries"];
+    NSArray *afterEntries = afterJSON[@"entries"];
+    if (![beforeEntries isKindOfClass:[NSArray class]] || ![afterEntries isKindOfClass:[NSArray class]]) {
+        fprintf(stderr, "Flash capture files are missing 'entries' arrays.\n");
+        return 1;
+    }
+
+    NSMutableDictionary<NSNumber *, NSDictionary *> *beforeByAddress = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSNumber *, NSDictionary *> *afterByAddress = [NSMutableDictionary dictionary];
+    for (NSDictionary *entry in beforeEntries) {
+        if ([entry isKindOfClass:[NSDictionary class]] && entry[@"addr"] != nil) {
+            beforeByAddress[entry[@"addr"]] = entry;
+        }
+    }
+    for (NSDictionary *entry in afterEntries) {
+        if ([entry isKindOfClass:[NSDictionary class]] && entry[@"addr"] != nil) {
+            afterByAddress[entry[@"addr"]] = entry;
+        }
+    }
+
+    NSMutableSet<NSNumber *> *allAddresses = [NSMutableSet setWithArray:beforeByAddress.allKeys];
+    [allAddresses addObjectsFromArray:afterByAddress.allKeys];
+    NSArray<NSNumber *> *sortedAddresses = [allAddresses.allObjects
+        sortedArrayUsingComparator:^NSComparisonResult(NSNumber *lhs, NSNumber *rhs) {
+          if (lhs.unsignedIntegerValue < rhs.unsignedIntegerValue) {
+              return NSOrderedAscending;
+          }
+          if (lhs.unsignedIntegerValue > rhs.unsignedIntegerValue) {
+              return NSOrderedDescending;
+          }
+          return NSOrderedSame;
+        }];
+
+    printf("t50 flash-diff before=%s after=%s\n", beforePath.UTF8String, afterPath.UTF8String);
+
+    NSUInteger changeCount = 0;
+    for (NSNumber *addressNumber in sortedAddresses) {
+        NSDictionary *beforeEntry = beforeByAddress[addressNumber];
+        NSDictionary *afterEntry = afterByAddress[addressNumber];
+
+        NSString *beforeHex = beforeEntry[@"data_hex"];
+        NSString *afterHex = afterEntry[@"data_hex"];
+        NSString *beforeError = beforeEntry[@"error"];
+        NSString *afterError = afterEntry[@"error"];
+
+        BOOL different = NO;
+        if ((beforeHex == nil) != (afterHex == nil)) {
+            different = YES;
+        } else if (beforeHex != nil && ![beforeHex isEqualToString:afterHex]) {
+            different = YES;
+        }
+        if ((beforeError == nil) != (afterError == nil)) {
+            different = YES;
+        } else if (beforeError != nil && ![beforeError isEqualToString:afterError]) {
+            different = YES;
+        }
+        if (!different) {
+            continue;
+        }
+
+        changeCount += 1;
+        NSUInteger address = addressNumber.unsignedIntegerValue;
+        if (beforeHex != nil && afterHex != nil) {
+            NSString *hexParseError = nil;
+            NSData *beforeBytes = [self dataFromHexInput:beforeHex errorMessage:&hexParseError];
+            NSData *afterBytes = [self dataFromHexInput:afterHex errorMessage:&hexParseError];
+            if (beforeBytes != nil && afterBytes != nil) {
+                const uint8_t *lhs = (const uint8_t *)beforeBytes.bytes;
+                const uint8_t *rhs = (const uint8_t *)afterBytes.bytes;
+                NSUInteger minLen = MIN(beforeBytes.length, afterBytes.length);
+                NSMutableArray<NSString *> *segments = [NSMutableArray array];
+                for (NSUInteger i = 0; i < minLen; ++i) {
+                    if (lhs[i] != rhs[i]) {
+                        [segments addObject:[NSString stringWithFormat:@"%lu:%02x->%02x",
+                                             (unsigned long)i,
+                                             lhs[i],
+                                             rhs[i]]];
+                    }
+                    if (segments.count == 8) {
+                        break;
+                    }
+                }
+                if (beforeBytes.length != afterBytes.length) {
+                    [segments addObject:[NSString stringWithFormat:@"len:%lu->%lu",
+                                         (unsigned long)beforeBytes.length,
+                                         (unsigned long)afterBytes.length]];
+                }
+                NSString *segmentString = segments.count > 0 ? [segments componentsJoinedByString:@", "] : @"content-changed";
+                printf("  addr=0x%04lx changed %s\n", (unsigned long)address, segmentString.UTF8String);
+                continue;
+            }
+        }
+
+        printf("  addr=0x%04lx changed (non-hex or error state)\n", (unsigned long)address);
+    }
+
+    if (changeCount == 0) {
+        printf("  no flash address changes detected.\n");
+    } else {
+        printf("  changed_addresses=%lu\n", (unsigned long)changeCount);
+    }
+
     return 0;
 }
 
