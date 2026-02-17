@@ -60,8 +60,25 @@ This exact flow is now available as CLI strategy `capture-v3` via:
 - `capture-v4` (`capture-v3` + `Hid_major` sync tail `07`, `08`, `06`, `1e 01`, `0a`) is now implemented for additional commit probing.
 - Some T50 firmware paths may use `Hid_simulator` split-channel packets instead of the 21-slot direct frame; CLI now exposes both probe families (`color-direct` and `color-sim116`).
 
+## Static Firmware/MCU Inference
+
+From UTF-16 string clusters in `Bloody7.exe`:
+
+- Legacy USB firmware template block includes:
+  - `A60cir_P3332A_%.3X_%d` (T50-family candidate)
+- Nearby MCU part block includes Sonix part strings:
+  - `SN8F2253B`, `SN8F22E88B`, `SN8F2288`, followed by modern `SN32F247B`/`SN32F248B` entries.
+- A static ordered-pair heuristic (scripted in `tools/re/bloody7_fw_mcu_map.py`) maps:
+  - `A60cir_P3332A_%.3X_%d` -> `SN8F22E88B`
+
+Confidence:
+
+- Medium. The model-to-MCU pairing is inferred from ordered blocks and string-reference code paths, not yet proven by a direct struct decode or firmware header decode.
+
 ## Next RE Targets
 
 - Isolate which opcode writes CPI table values directly (separate from simulator action stepping).
 - Map kernel/core switch command path to simulator family changes (`15` vs `26/27`) using before/after `t50 capture` snapshots.
 - Locate transaction(s) that commit CPI/core edits without touching lighting pages.
+- Lift and decode the dispatch tables around firmware template references (`0x41af..`) and MCU references (`0x41de..0x422c`) to prove per-model MCU pairing without heuristics.
+- Reverse the `.sn8encode5` header/layout enough to confirm the target MCU from encoded firmware blobs directly.
