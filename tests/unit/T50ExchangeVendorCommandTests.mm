@@ -606,6 +606,87 @@ int main(void) {
             return 1;
         }
 
+        [flashSpy.writes removeAllObjects];
+        NSMutableData *adjustGunTable = [NSMutableData dataWithLength:256];
+        uint16_t *adjustGunWords = (uint16_t *)adjustGunTable.mutableBytes;
+        for (NSUInteger index = 0; index < 128; ++index) {
+            adjustGunWords[index] = (uint16_t)index;
+        }
+
+        uint16_t expectedChecksum1 = 0;
+        uint16_t expectedChecksum2 = 0;
+        for (NSUInteger index = 4; index < 128; ++index) {
+            uint16_t value = (uint16_t)index;
+            expectedChecksum1 = (uint16_t)(expectedChecksum1 + value);
+            expectedChecksum2 = (uint16_t)(expectedChecksum2 + (uint16_t)(value * (uint16_t)index));
+        }
+
+        NSError *adjustGunWriteError = nil;
+        BOOL adjustGunWriteOK = [flashUseCase writeAdjustGunWordTableToBaseAddress:0x1c00
+                                                                          tableData:adjustGunTable
+                                                                           onDevice:device
+                                                                              error:&adjustGunWriteError];
+        if (!Expect(adjustGunWriteOK, @"Expected adjustgun table write to succeed.")) {
+            return 1;
+        }
+        if (!Expect(adjustGunWriteError == nil, @"Expected no error for valid adjustgun table write.")) {
+            return 1;
+        }
+        if (!Expect(flashSpy.writes.count == 9, @"Expected adjustgun write to emit 8 chunk writes + 1 marker write.")) {
+            return 1;
+        }
+
+        const uint8_t *adjustGunChunk0 = (const uint8_t *)flashSpy.writes.firstObject.bytes;
+        if (!Expect(adjustGunChunk0[1] == 0x2f && adjustGunChunk0[2] == 0x79 &&
+                        adjustGunChunk0[3] == 0x1c && adjustGunChunk0[4] == 0x00 &&
+                        adjustGunChunk0[5] == 0x80,
+                    @"Expected first adjustgun chunk write to use 16-word verify mode at base addr.")) {
+            return 1;
+        }
+        if (!Expect(adjustGunChunk0[8] == 0xff && adjustGunChunk0[9] == 0xff &&
+                        adjustGunChunk0[10] == 0xff && adjustGunChunk0[11] == 0xff,
+                    @"Expected adjustgun header words[0..1] to be stamped with 0xFFFF.")) {
+            return 1;
+        }
+        if (!Expect(adjustGunChunk0[12] == (uint8_t)(expectedChecksum1 & 0xFF) &&
+                        adjustGunChunk0[13] == (uint8_t)((expectedChecksum1 >> 8) & 0xFF) &&
+                        adjustGunChunk0[14] == (uint8_t)(expectedChecksum2 & 0xFF) &&
+                        adjustGunChunk0[15] == (uint8_t)((expectedChecksum2 >> 8) & 0xFF),
+                    @"Expected adjustgun header words[2..3] to match computed checksums.")) {
+            return 1;
+        }
+
+        const uint8_t *adjustGunChunk1 = (const uint8_t *)flashSpy.writes[1].bytes;
+        if (!Expect(adjustGunChunk1[3] == 0x1c && adjustGunChunk1[4] == 0x10,
+                    @"Expected second adjustgun chunk write to advance address by 0x10 words.")) {
+            return 1;
+        }
+
+        const uint8_t *adjustGunMarkerPacket = (const uint8_t *)flashSpy.writes.lastObject.bytes;
+        if (!Expect(adjustGunMarkerPacket[1] == 0x2f && adjustGunMarkerPacket[2] == 0x01 &&
+                        adjustGunMarkerPacket[3] == 0x1c && adjustGunMarkerPacket[4] == 0x00 &&
+                        adjustGunMarkerPacket[5] == 0x00 &&
+                        adjustGunMarkerPacket[8] == 0xa4 && adjustGunMarkerPacket[9] == 0xa4,
+                    @"Expected adjustgun marker write to stamp 0xA4A4 at base address.")) {
+            return 1;
+        }
+
+        NSError *adjustGunLengthError = nil;
+        BOOL invalidAdjustGunLength = [flashUseCase writeAdjustGunWordTableToBaseAddress:0x1c00
+                                                                                tableData:[NSMutableData dataWithLength:128]
+                                                                                 onDevice:device
+                                                                                    error:&adjustGunLengthError];
+        if (!Expect(!invalidAdjustGunLength, @"Expected adjustgun write with invalid length to fail.")) {
+            return 1;
+        }
+        if (!Expect(adjustGunLengthError != nil, @"Expected adjustgun invalid-length error.")) {
+            return 1;
+        }
+        if (!Expect(adjustGunLengthError.code == MLDT50ControlErrorCodeInvalidAdjustGunTableLength,
+                    @"Expected adjustgun invalid-length error code.")) {
+            return 1;
+        }
+
         MLDRecordingFeatureTransportSpy *saveSpy = [[MLDRecordingFeatureTransportSpy alloc] init];
         MLDT50ExchangeVendorCommandUseCase *saveUseCase =
             [[MLDT50ExchangeVendorCommandUseCase alloc] initWithFeatureTransportPort:saveSpy];

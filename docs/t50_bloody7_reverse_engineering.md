@@ -94,6 +94,23 @@ These are now first-class CLI utilities (`flash-read8`, `flash-read32`, `flash-w
 - Repeated DPI changes (`dpi-set` + `save` with `capture-v4`) did not alter coarse flash-read snapshots (`0x0000..0xff00`, step `0x100`) nor the targeted `0x1c00..0x2fff` step `0x10` scan.
 - Current inference: existing `dpi-step`/`dpi-set` path is runtime-only for T50 and does not yet execute the full Bloody7 table+checksum flash update sequence.
 
+## `Iom_adjustgun` Word-Table Flow (Static + Live Correlation)
+
+- Disassembly around `0x417768` confirms this flash flow:
+  - read header at base (`flash_read8`)
+  - compute two 16-bit checksums over words `4..127`
+  - stamp header words: `0xFFFF, 0xFFFF, checksum1, checksum2`
+  - write 8 chunks (`16` words each) via `flash_write_words_verify` at `base + 0x00, 0x10, ... 0x70`
+  - finalize with single-word marker `0xA4A4` via `flash_write_words` at `base`
+- Live T50 readback at `0x1c00` (`a4 a4 ff ff ...`) matches this header shape (`marker + 0xFFFF + checksums`).
+- `mloody` now exposes this algorithm directly for controlled RE:
+
+```bash
+./build/mloody t50 adjustgun-write16 --addr 0x1c00 --data "<256-byte-hex>" --unsafe 1
+```
+
+- This is intentionally unsafe and currently for reverse-engineering only.
+
 ## New Static RE Utility
 
 - `tools/re/bloody7_adjustgun_map.py` extracts callsites to `Hid_flash` primitives and groups per-function primitive sequences.

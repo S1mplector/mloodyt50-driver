@@ -33,6 +33,10 @@ static const NSUInteger MLDT50FlashRead32AddressOffset = 28;
 static const NSUInteger MLDT50FlashRead32ResponseOffset = 32;
 static const uint8_t MLDT50FlashRead32Mode = 0x00;
 static const uint8_t MLDT50FlashWrite32Mode = 0x01;
+static const NSUInteger MLDT50AdjustGunWordCount = 128;
+static const NSUInteger MLDT50AdjustGunTableByteCount = MLDT50AdjustGunWordCount * sizeof(uint16_t);
+static const NSUInteger MLDT50AdjustGunHeaderWordCount = 4;
+static const NSUInteger MLDT50AdjustGunChunkWordCount = 16;
 
 typedef struct {
     uint8_t opcode;
@@ -608,6 +612,103 @@ static const MLDT50SaveStep MLDT50MajorSyncSequence[] = {
                                       payload:payload
                                         error:error];
     return response != nil;
+}
+
+- (BOOL)writeAdjustGunWordTableToBaseAddress:(uint16_t)baseAddress
+                                    tableData:(NSData *)tableData
+                                     onDevice:(MLDMouseDevice *)device
+                                        error:(NSError **)error {
+    if (tableData.length != MLDT50AdjustGunTableByteCount) {
+        if (error != nil) {
+            NSString *message = [NSString
+                stringWithFormat:@"Adjustgun table must be exactly %lu bytes.",
+                                 (unsigned long)MLDT50AdjustGunTableByteCount];
+            *error = [NSError errorWithDomain:MLDT50ControlErrorDomain
+                                         code:MLDT50ControlErrorCodeInvalidAdjustGunTableLength
+                                     userInfo:@{NSLocalizedDescriptionKey : message}];
+        }
+        return NO;
+    }
+
+    const NSUInteger lastChunkWordOffset = MLDT50AdjustGunWordCount - MLDT50AdjustGunChunkWordCount;
+    if (baseAddress > (uint16_t)(0xFFFFu - lastChunkWordOffset)) {
+        if (error != nil) {
+            NSString *message = [NSString
+                stringWithFormat:@"Adjustgun base address 0x%04x exceeds writable range for %lu words.",
+                                 baseAddress,
+                                 (unsigned long)MLDT50AdjustGunWordCount];
+            *error = [NSError errorWithDomain:MLDT50ControlErrorDomain
+                                         code:MLDT50ControlErrorCodeInvalidPayloadOffset
+                                     userInfo:@{NSLocalizedDescriptionKey : message}];
+        }
+        return NO;
+    }
+
+    NSMutableData *stagedTable = [tableData mutableCopy];
+    uint16_t *words = (uint16_t *)stagedTable.mutableBytes;
+
+    uint16_t checksum1 = 0;
+    uint16_t checksum2 = 0;
+    for (NSUInteger index = MLDT50AdjustGunHeaderWordCount; index < MLDT50AdjustGunWordCount; ++index) {
+        uint16_t value = words[index];
+        checksum1 = (uint16_t)(checksum1 + value);
+        checksum2 = (uint16_t)(checksum2 + (uint16_t)(value * (uint16_t)index));
+    }
+
+    words[0] = 0xFFFF;
+    words[1] = 0xFFFF;
+    words[2] = checksum1;
+    words[3] = checksum2;
+
+    for (NSUInteger wordOffset = 0; wordOffset < MLDT50AdjustGunWordCount; wordOffset += MLDT50AdjustGunChunkWordCount) {
+        NSData *chunk = [stagedTable subdataWithRange:NSMakeRange(wordOffset * sizeof(uint16_t),
+                                                                  MLDT50AdjustGunChunkWordCount * sizeof(uint16_t))];
+        NSError *writeError = nil;
+        BOOL wrote = [self writeFlashWordsToAddress:(uint16_t)(baseAddress + wordOffset)
+                                           wordData:chunk
+                                         verifyMode:YES
+                                           onDevice:device
+                                              error:&writeError];
+        if (!wrote) {
+            if (error != nil) {
+                NSString *message =
+                    [NSString stringWithFormat:@"Adjustgun chunk write failed at word offset 0x%02lx (addr=0x%04x).",
+                                               (unsigned long)wordOffset,
+                                               (uint16_t)(baseAddress + wordOffset)];
+                NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithObject:message
+                                                                                     forKey:NSLocalizedDescriptionKey];
+                if (writeError != nil) {
+                    userInfo[NSUnderlyingErrorKey] = writeError;
+                }
+                *error = [NSError errorWithDomain:MLDT50ControlErrorDomain
+                                             code:MLDT50ControlErrorCodeSaveSequenceFailed
+                                         userInfo:userInfo];
+            }
+            return NO;
+        }
+    }
+
+    const uint16_t marker = 0xA4A4;
+    NSData *markerData = [NSData dataWithBytes:&marker length:sizeof(marker)];
+    NSError *markerError = nil;
+    BOOL markerWrote = [self writeFlashWordsToAddress:baseAddress
+                                             wordData:markerData
+                                           verifyMode:NO
+                                             onDevice:device
+                                                error:&markerError];
+    if (!markerWrote && error != nil) {
+        NSString *message = [NSString stringWithFormat:@"Adjustgun marker write failed at addr=0x%04x.", baseAddress];
+        NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithObject:message
+                                                                             forKey:NSLocalizedDescriptionKey];
+        if (markerError != nil) {
+            userInfo[NSUnderlyingErrorKey] = markerError;
+        }
+        *error = [NSError errorWithDomain:MLDT50ControlErrorDomain
+                                     code:MLDT50ControlErrorCodeSaveSequenceFailed
+                                 userInfo:userInfo];
+    }
+
+    return markerWrote;
 }
 
 - (BOOL)executeSaveStep:(MLDT50SaveStep)step

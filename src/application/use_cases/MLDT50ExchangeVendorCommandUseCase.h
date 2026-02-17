@@ -21,6 +21,7 @@ typedef NS_ERROR_ENUM(MLDT50ControlErrorDomain, MLDT50ControlErrorCode) {
     MLDT50ControlErrorCodeInvalidDPIStepAction = 9,
     MLDT50ControlErrorCodeInvalidFlashCount = 10,
     MLDT50ControlErrorCodeInvalidFlashPayloadLength = 11,
+    MLDT50ControlErrorCodeInvalidAdjustGunTableLength = 12,
 };
 
 typedef NS_ENUM(NSUInteger, MLDT50SaveStrategy) {
@@ -110,6 +111,11 @@ typedef NS_ENUM(NSUInteger, MLDT50DPIStepAction) {
                         dwordData:(NSData *)dwordData
                          onDevice:(MLDMouseDevice *)device
                             error:(NSError **)error;
+
+- (BOOL)writeAdjustGunWordTableToBaseAddress:(uint16_t)baseAddress
+                                    tableData:(NSData *)tableData
+                                     onDevice:(MLDMouseDevice *)device
+                                        error:(NSError **)error;
 
 - (BOOL)saveSettingsToDevice:(MLDMouseDevice *)device
                     strategy:(MLDT50SaveStrategy)strategy

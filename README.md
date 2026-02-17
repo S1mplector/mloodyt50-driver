@@ -2,7 +2,7 @@
 
 `mloodyt50-driver` is a Bloody T50 mouse (LK) driver for macOS. 
 
-> Upon request, I can reverse engineer other Bloody mice and make macOS drivers as well. Contact me on mehmetogluilgaz07@gmail.com. I decided to make this driver purely out of the reason that Bloody T50 is the only mouse I own, and I didn't want to pay for other mice. 
+> Upon request, I can reverse engineer other Bloody mice and make macOS drivers as well. Contact me on mehmetogluilgaz07@gmail.com. I decided to make this driver purely out of the reason that the Bloody T50 is the only mouse I own, and I don't want to pay for other mice. 
 
 I intentionally layered the repository hexagonally so core behavior is decoupled from macOS-specific I/O and transport details.
 
@@ -54,6 +54,7 @@ ctest --test-dir build --output-on-failure
 ./build/mloody t50 flash-read32 --addr 0x2e00 --count 1
 ./build/mloody t50 flash-write16 --addr 0x1c00 --data "34 12 78 56" --verify 1 --unsafe 1
 ./build/mloody t50 flash-write32 --addr 0x2e00 --data "78 56 34 12" --unsafe 1
+./build/mloody t50 adjustgun-write16 --addr 0x1c00 --data "<256-byte-hex>" --unsafe 1
 ./build/mloody t50 flash-scan8 --from 0x1c00 --to 0x2f00 --step 0x100 --nonzero-only 1
 ./build/mloody t50 flash-capture --file tmp/captures/flash_before.json --from 0x0000 --to 0xffff --step 0x0100 --nonzero-only 1
 ./build/mloody t50 flash-diff --before tmp/captures/flash_before.json --after tmp/captures/flash_after.json
@@ -123,6 +124,7 @@ Available tools:
 ./build/mloody t50 save --strategy quick
 ./build/mloody t50 flash-read8 --addr 0x1c00
 ./build/mloody t50 flash-read32 --addr 0x2e00 --count 1
+./build/mloody t50 adjustgun-write16 --addr 0x1c00 --data "<256-byte-hex>" --unsafe 1
 ./build/mloody t50 flash-scan8 --from 0x0000 --to 0xffff --step 0x0100 --nonzero-only 1
 ./build/mloody t50 flash-capture --file tmp/captures/flash_before.json --from 0x0000 --to 0xffff --step 0x0100 --nonzero-only 1
 ./build/mloody t50 flash-diff --before tmp/captures/flash_before.json --after tmp/captures/flash_after.json
@@ -152,6 +154,7 @@ Current mapping hypothesis for T50 packets: `logo=slot 15`, `wheel=slots 7,8,21`
 `flash-capture` writes a JSON snapshot of `flash-read8` sweep results for reproducible before/after persistence experiments.
 `flash-diff` compares two `flash-capture` files and prints changed addresses with byte-level deltas.
 `flash-write16` and `flash-write32` expose invasive write primitives and require `--unsafe 1`.
+`adjustgun-write16` replays Bloody7's `Iom_adjustgun` word-table flash algorithm (256-byte table, checksum/header stamping, 8 verified chunks, final `0xA4A4` marker) and requires `--unsafe 1`.
 `capture-v2` mirrors only the observed Windows "OK/save" tail (`03 03 0b 00`, `14`, `05`, `2f`, `0e`, `0f`, `0c`, `0a`).
 `capture-v3` replays the fuller traced flow (warmup `03 06 05/06/02`, brightness menu open `03 03 0b 01`, brightness ramp `11:0..3` with `0a` ticks, then the same tail plus `03 06 05/06`) and remains the baseline persistence strategy.
 `capture-v4` appends a `Hid_major` sync tail (`07`, `08`, `06`, `1e 01`, `0a`) after `capture-v3`.

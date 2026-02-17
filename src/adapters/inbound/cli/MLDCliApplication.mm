@@ -510,6 +510,8 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
     printf("  t50 flash-read32 --addr <n> [--count <1..2>] [selectors]\n");
     printf("  t50 flash-write16 --addr <n> --data <hex> [--verify <0|1>] --unsafe <0|1> [selectors]\n");
     printf("  t50 flash-write32 --addr <n> --data <hex> --unsafe <0|1> [selectors]\n");
+    printf("  t50 adjustgun-write16 --addr <n> --data <hex256> --unsafe <0|1> [selectors]\n");
+    printf("  t50 adjustgun-scan [--from <n>] [--to <n>] [--step <n>] [selectors]\n");
     printf("  t50 flash-scan8 --from <n> --to <n> [--step <n>] [--nonzero-only <0|1>] [selectors]\n");
     printf("  t50 flash-capture --file <path> [--from <n>] [--to <n>] [--step <n>] [--nonzero-only <0|1>] [selectors]\n");
     printf("  t50 flash-diff --before <path> --after <path>\n");
@@ -593,6 +595,12 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
     }
     if ([subcommand isEqualToString:@"flash-write32"]) {
         return [self runT50FlashWrite32WithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"adjustgun-write16"]) {
+        return [self runT50AdjustGunWrite16WithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"adjustgun-scan"]) {
+        return [self runT50AdjustGunScanWithArguments:subArguments];
     }
     if ([subcommand isEqualToString:@"flash-scan8"]) {
         return [self runT50FlashScan8WithArguments:subArguments];
@@ -1855,6 +1863,110 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
            (unsigned long)addressValue,
            (unsigned long)(payload.length / 4),
            [self hexStringFromData:payload].UTF8String);
+    return 0;
+}
+
+- (int)runT50AdjustGunWrite16WithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[
+        @"--addr", @"--data", @"--unsafe", @"--vid", @"--pid", @"--serial", @"--model"
+    ]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *addrString = options[@"--addr"];
+    NSString *dataString = options[@"--data"];
+    if (addrString == nil || dataString == nil) {
+        fprintf(stderr, "t50 adjustgun-write16 requires --addr <n> and --data <hex256>.\n");
+        return 1;
+    }
+
+    NSUInteger addressValue = 0;
+    NSUInteger unsafeValue = 0;
+    if (![self parseRequiredUnsigned:addrString maxValue:0xFFFF fieldName:@"--addr" output:&addressValue errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--unsafe"] maxValue:1 fieldName:@"--unsafe" output:&unsafeValue errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+    if (unsafeValue != 1) {
+        fprintf(stderr, "t50 adjustgun-write16 requires --unsafe 1.\n");
+        return 1;
+    }
+
+    NSData *payload = [self dataFromHexInput:dataString errorMessage:&parseError];
+    if (payload == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+    if (payload.length != 256) {
+        fprintf(stderr, "t50 adjustgun-write16 requires exactly 256 payload bytes (128 words).\n");
+        return 1;
+    }
+
+    const uint8_t *rawPayload = (const uint8_t *)payload.bytes;
+    uint16_t checksum1 = 0;
+    uint16_t checksum2 = 0;
+    for (NSUInteger index = 4; index < 128; ++index) {
+        NSUInteger offset = index * 2;
+        uint16_t value = (uint16_t)rawPayload[offset] | ((uint16_t)rawPayload[offset + 1] << 8);
+        checksum1 = (uint16_t)(checksum1 + value);
+        checksum2 = (uint16_t)(checksum2 + (uint16_t)(value * (uint16_t)index));
+    }
+
+    MLDMouseDevice *target = [self selectT50DeviceWithOptions:options errorMessage:&parseError];
+    if (target == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSError *writeError = nil;
+    BOOL ok = [self.t50ExchangeCommandUseCase writeAdjustGunWordTableToBaseAddress:(uint16_t)addressValue
+                                                                           tableData:payload
+                                                                            onDevice:target
+                                                                               error:&writeError];
+    if (!ok) {
+        fprintf(stderr, "t50 adjustgun-write16 error: %s\n", writeError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    NSError *headerError = nil;
+    NSData *header = [self.t50ExchangeCommandUseCase readFlashBytes8FromAddress:(uint16_t)addressValue
+                                                                        onDevice:target
+                                                                           error:&headerError];
+    if (header == nil || header.length < 8) {
+        fprintf(stderr, "t50 adjustgun-write16 warning: header readback failed: %s\n",
+                headerError.localizedDescription.UTF8String);
+        printf("t50 adjustgun-write16 ok addr=0x%04lx checksum1=0x%04x checksum2=0x%04x\n",
+               (unsigned long)addressValue,
+               checksum1,
+               checksum2);
+        return 0;
+    }
+
+    const uint8_t *headerBytes = (const uint8_t *)header.bytes;
+    uint16_t marker = (uint16_t)headerBytes[0] | ((uint16_t)headerBytes[1] << 8);
+    uint16_t headerWord1 = (uint16_t)headerBytes[2] | ((uint16_t)headerBytes[3] << 8);
+    uint16_t headerChecksum1 = (uint16_t)headerBytes[4] | ((uint16_t)headerBytes[5] << 8);
+    uint16_t headerChecksum2 = (uint16_t)headerBytes[6] | ((uint16_t)headerBytes[7] << 8);
+
+    printf("t50 adjustgun-write16 ok addr=0x%04lx checksum1=0x%04x checksum2=0x%04x readback=%s\n",
+           (unsigned long)addressValue,
+           checksum1,
+           checksum2,
+           [self hexStringFromData:header].UTF8String);
+    printf("  header marker=0x%04x word1=0x%04x checksum1=0x%04x checksum2=0x%04x\n",
+           marker,
+           headerWord1,
+           headerChecksum1,
+           headerChecksum2);
     return 0;
 }
 
