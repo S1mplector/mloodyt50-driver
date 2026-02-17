@@ -18,6 +18,7 @@ typedef NS_ERROR_ENUM(MLDT50ControlErrorDomain, MLDT50ControlErrorCode) {
     MLDT50ControlErrorCodeSaveSequenceFailed = 6,
     MLDT50ControlErrorCodeUnsupportedSaveStrategy = 7,
     MLDT50ControlErrorCodeInvalidCoreSlot = 8,
+    MLDT50ControlErrorCodeInvalidDPIStepAction = 9,
 };
 
 typedef NS_ENUM(NSUInteger, MLDT50SaveStrategy) {
@@ -27,6 +28,12 @@ typedef NS_ENUM(NSUInteger, MLDT50SaveStrategy) {
     MLDT50SaveStrategyCaptureV3 = 3,
     MLDT50SaveStrategyCaptureV4 = 4,
     MLDT50SaveStrategyMajorSync = 5,
+};
+
+typedef NS_ENUM(NSUInteger, MLDT50DPIStepAction) {
+    MLDT50DPIStepActionDown = 0,
+    MLDT50DPIStepActionUp = 1,
+    MLDT50DPIStepActionCycle = 2,
 };
 
 @interface MLDT50ExchangeVendorCommandUseCase : NSObject
@@ -61,6 +68,26 @@ typedef NS_ENUM(NSUInteger, MLDT50SaveStrategy) {
 
 - (nullable NSDictionary<NSString *, NSNumber *> *)readCoreStateCandidateForDevice:(MLDMouseDevice *)device
                                                                               error:(NSError **)error;
+
+- (BOOL)setSLEDProfileIndexCandidate:(uint8_t)index
+                             onDevice:(MLDMouseDevice *)device
+                                error:(NSError **)error;
+
+- (nullable NSNumber *)readSLEDProfileIndexCandidateForDevice:(MLDMouseDevice *)device
+                                                         error:(NSError **)error;
+
+- (BOOL)setSLEDEnabledCandidate:(BOOL)enabled
+                        onDevice:(MLDMouseDevice *)device
+                           error:(NSError **)error;
+
+- (nullable NSNumber *)readSLEDEnabledCandidateForDevice:(MLDMouseDevice *)device
+                                                    error:(NSError **)error;
+
+- (BOOL)stepDPICandidateAction:(MLDT50DPIStepAction)action
+                        opcode:(uint8_t)opcode
+                        commit:(BOOL)commit
+                      onDevice:(MLDMouseDevice *)device
+                         error:(NSError **)error;
 
 - (BOOL)saveSettingsToDevice:(MLDMouseDevice *)device
                     strategy:(MLDT50SaveStrategy)strategy

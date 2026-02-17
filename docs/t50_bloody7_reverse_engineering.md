@@ -17,6 +17,9 @@ This document tracks high-confidence findings from the extracted Bloody7 bundle 
 - `Hid_simulator` includes split-channel color writes with subcommands `06 07`, `06 08`, `06 09`, `06 0A`, `06 0B`, `06 0C`; each transmits 58 channel bytes as:
   - packet bytes `6..7` = chunk bytes `56..57`
   - packet bytes `8..63` = chunk bytes `0..55`
+- Static disassembly of `Hid_sled` (`0x55f4f8`/`0x55f578`) shows dedicated SLED/profile probes:
+  - `opcode 0x15` with a single parameter byte written at payload offset `8`
+  - `opcode 0x16` with a boolean parameter byte written at payload offset `8` (`0` or `1`)
 
 ## Captured Persistence Transaction (Windows)
 

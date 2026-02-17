@@ -20,6 +20,11 @@ static const uint8_t MLDT50CoreCommandPrefix1 = 0x80;
 static const uint8_t MLDT50CoreSlotMin = 1;
 static const uint8_t MLDT50CoreSlotMax = 4;
 static const NSUInteger MLDT50CoreReadWordOffset = MLDT50CorePayloadOffset + 2;
+static const uint8_t MLDT50SLEDProfileOpcodeCandidate = 0x15;
+static const uint8_t MLDT50SLEDEnableOpcodeCandidate = 0x16;
+static const NSUInteger MLDT50SLEDPayloadOffset = 8;
+static const uint8_t MLDT50DPIStepCommitOpcodeCandidate = 0x0A;
+static const NSUInteger MLDT50DPIStepPayloadOffset = 8;
 
 typedef struct {
     uint8_t opcode;
@@ -320,6 +325,114 @@ static const MLDT50SaveStep MLDT50MajorSyncSequence[] = {
         @"lowBits" : @(lowBits),
         @"slot" : @(slot),
     };
+}
+
+- (BOOL)setSLEDProfileIndexCandidate:(uint8_t)index
+                             onDevice:(MLDMouseDevice *)device
+                                error:(NSError **)error {
+    NSData *payload = [NSData dataWithBytes:&index length:1];
+    NSData *response = [self executeForDevice:device
+                                       opcode:MLDT50SLEDProfileOpcodeCandidate
+                                    writeFlag:MLDT50ReadFlag
+                                payloadOffset:MLDT50SLEDPayloadOffset
+                                      payload:payload
+                                        error:error];
+    return response != nil;
+}
+
+- (nullable NSNumber *)readSLEDProfileIndexCandidateForDevice:(MLDMouseDevice *)device
+                                                         error:(NSError **)error {
+    NSData *response = [self executeForDevice:device
+                                       opcode:MLDT50SLEDProfileOpcodeCandidate
+                                    writeFlag:MLDT50ReadFlag
+                                payloadOffset:MLDT50SLEDPayloadOffset
+                                      payload:[NSData data]
+                                        error:error];
+    if (response == nil || response.length <= MLDT50SLEDPayloadOffset) {
+        return nil;
+    }
+
+    const uint8_t *bytes = (const uint8_t *)response.bytes;
+    return @(bytes[MLDT50SLEDPayloadOffset]);
+}
+
+- (BOOL)setSLEDEnabledCandidate:(BOOL)enabled
+                        onDevice:(MLDMouseDevice *)device
+                           error:(NSError **)error {
+    const uint8_t value = enabled ? 1 : 0;
+    NSData *payload = [NSData dataWithBytes:&value length:1];
+    NSData *response = [self executeForDevice:device
+                                       opcode:MLDT50SLEDEnableOpcodeCandidate
+                                    writeFlag:MLDT50ReadFlag
+                                payloadOffset:MLDT50SLEDPayloadOffset
+                                      payload:payload
+                                        error:error];
+    return response != nil;
+}
+
+- (nullable NSNumber *)readSLEDEnabledCandidateForDevice:(MLDMouseDevice *)device
+                                                    error:(NSError **)error {
+    NSData *response = [self executeForDevice:device
+                                       opcode:MLDT50SLEDEnableOpcodeCandidate
+                                    writeFlag:MLDT50ReadFlag
+                                payloadOffset:MLDT50SLEDPayloadOffset
+                                      payload:[NSData data]
+                                        error:error];
+    if (response == nil || response.length <= MLDT50SLEDPayloadOffset) {
+        return nil;
+    }
+
+    const uint8_t *bytes = (const uint8_t *)response.bytes;
+    return @((bytes[MLDT50SLEDPayloadOffset] == 0) ? 0 : 1);
+}
+
+- (BOOL)stepDPICandidateAction:(MLDT50DPIStepAction)action
+                        opcode:(uint8_t)opcode
+                        commit:(BOOL)commit
+                      onDevice:(MLDMouseDevice *)device
+                         error:(NSError **)error {
+    uint8_t actionByte = 0;
+    switch (action) {
+        case MLDT50DPIStepActionDown:
+            actionByte = 0x00;
+            break;
+        case MLDT50DPIStepActionUp:
+            actionByte = 0x01;
+            break;
+        case MLDT50DPIStepActionCycle:
+            actionByte = 0x02;
+            break;
+        default:
+            if (error != nil) {
+                *error = [NSError errorWithDomain:MLDT50ControlErrorDomain
+                                             code:MLDT50ControlErrorCodeInvalidDPIStepAction
+                                         userInfo:@{NSLocalizedDescriptionKey : @"DPI action must be down, up, or cycle."}];
+            }
+            return NO;
+    }
+
+    NSData *stepPayload = [NSData dataWithBytes:&actionByte length:1];
+    NSData *stepResponse = [self executeForDevice:device
+                                           opcode:opcode
+                                        writeFlag:MLDT50ReadFlag
+                                    payloadOffset:MLDT50DPIStepPayloadOffset
+                                          payload:stepPayload
+                                            error:error];
+    if (stepResponse == nil) {
+        return NO;
+    }
+
+    if (!commit) {
+        return YES;
+    }
+
+    NSData *commitResponse = [self executeForDevice:device
+                                             opcode:MLDT50DPIStepCommitOpcodeCandidate
+                                          writeFlag:MLDT50ReadFlag
+                                      payloadOffset:MLDT50DPIStepPayloadOffset
+                                            payload:[NSData data]
+                                              error:error];
+    return commitResponse != nil;
 }
 
 - (BOOL)executeSaveStep:(MLDT50SaveStep)step

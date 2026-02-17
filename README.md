@@ -2,7 +2,7 @@
 
 `mloodyt50-driver` is a Bloody T50 mouse (LK) driver for macOS. 
 
-Upon request, I can reverse engineer other Bloody mice and make macOS drivers as well. Contact me on mehmetogluilgaz07@gmail.com.
+> Upon request, I can reverse engineer other Bloody mice and make macOS drivers as well. Contact me on mehmetogluilgaz07@gmail.com. I decided to make this driver purely out of the reason that Bloody T50 is the only mouse I own, and I didn't want to pay for other mice. 
 
 I intentionally layered the repository hexagonally so core behavior is decoupled from macOS-specific I/O and transport details.
 
@@ -31,6 +31,10 @@ ctest --test-dir build --output-on-failure
 ./build/mloody feature-scan --from 0x01 --to 0x10 --length 16
 ./build/mloody t50 backlight-get
 ./build/mloody t50 backlight-set --level 2
+./build/mloody t50 sled-profile-get
+./build/mloody t50 sled-profile-set --index 3 --save 1 --strategy capture-v3
+./build/mloody t50 sled-enable-get
+./build/mloody t50 sled-enable-set --enabled 1 --save 1 --strategy capture-v3
 ./build/mloody t50 color-mode --mode open
 ./build/mloody t50 color-mode --mode effect
 ./build/mloody t50 color-direct --r 255 --g 0 --b 0 --frames 60 --save 0
@@ -46,7 +50,8 @@ ctest --test-dir build --output-on-failure
 ./build/mloody t50 save --strategy quick
 ./build/mloody t50 command-read --opcode 0x11 --flag 0x00
 ./build/mloody t50 command-write --opcode 0x11 --data "ff 00 00" --offset 8
-./build/mloody t50 dpi-step --action up
+./build/mloody t50 dpi-set --dpi 1600 --save 1 --strategy capture-v3
+./build/mloody t50 dpi-step --action up --count 2
 ./build/mloody t50 dpi-step --action down --save 1 --strategy capture-v3
 ```
 
@@ -84,8 +89,9 @@ Available tools:
 
 ```bash
 ./build/mloody t50 opcode-scan --from 0x10 --to 0x30 --flag 0x00
+./build/mloody t50 dpi-set --dpi 1600 --save 1 --strategy capture-v3
 ./build/mloody t50 dpi-probe --opcode 0x20 --dpi 1600
-./build/mloody t50 dpi-step --action up
+./build/mloody t50 dpi-step --action up --count 3 --delay-ms 100
 ./build/mloody t50 dpi-step --action down --save 1 --strategy capture-v3
 ./build/mloody t50 polling-probe --opcode 0x21 --hz 1000
 ./build/mloody t50 lod-probe --opcode 0x22 --lod 2
@@ -98,6 +104,10 @@ Available tools:
 ./build/mloody t50 color-sweep --r 255 --g 255 --b 0 --from 1 --to 21 --delay-ms 300
 ./build/mloody t50 color-sim116 --r 255 --g 0 --b 0 --from 0 --to 115 --delay-ms 300
 ./build/mloody t50 color-probe --opcode 0x13 --r 255 --g 0 --b 0
+./build/mloody t50 sled-profile-get
+./build/mloody t50 sled-profile-set --index 3 --save 1 --strategy capture-v3
+./build/mloody t50 sled-enable-get
+./build/mloody t50 sled-enable-set --enabled 1 --save 1 --strategy capture-v3
 ./build/mloody t50 core-get
 ./build/mloody t50 core-state
 ./build/mloody t50 core-set --core 1 --verify 1 --retries 2 --save 1 --strategy capture-v4
@@ -106,8 +116,9 @@ Available tools:
 ./build/mloody t50 save --strategy quick
 ```
 
+`dpi-set` targets a requested DPI using the default ladder (`400, 800, 1200, 1600, 2000, 3200, 4000`) by calibrating downward first and then stepping up; it defaults to persistence mode (`--save 1`, strategy `capture-v3`) so settings survive replug/restart.
 `dpi-probe`/`polling-probe`/`lod-probe`/`color-probe` are mapping helpers; they are intentionally explicit about opcode so you can test and confirm behavior on your own device before we lock in stable named mappings.
-`dpi-step` is an experimental CPI rocker simulator (`up`, `down`, `cycle`) that targets the observed simulator-family path (`opcode 0x0f` by default) and can optionally run `--save 1` to persist using the selected save strategy.
+`dpi-step` is an experimental CPI rocker simulator (`up`, `down`, `cycle`) that targets the observed simulator-family path (`opcode 0x0f` by default); it now supports repeated actions via `--count` and `--delay-ms`.
 `color-mode` sends captured menu/mode transitions (`open`, `effect`, `discard`) over `opcode 0x03`. (`constant` is kept as a compatibility alias for `effect`.)
 `color-direct`/`color-zone` now default to safer live-probe behavior: `--prepare 0`, `--save 0`, `--strategy quick`, and `--frames 1`.
 `color-direct` currently targets a 21-slot direct RGB frame hypothesis for T50 packets.
@@ -117,6 +128,8 @@ Use `--prepare 1` to run the captured preamble (`open` + `0x00 0x02`) before RGB
 `color-zone` is a safer named wrapper around `color-direct` for common targets (`logo`, `wheel`, `wheel-indicator`, `rear`, `all`) and defaults to `--save 0` during RE.
 Current mapping hypothesis for T50 packets: `logo=slot 15`, `wheel=slots 7,8,21`, `wheel-indicator=slot 21`, `rear=slots 1-6,9-14,16-20`, `all=slots 1-21`.
 `color-sim116` replays Bloody7's split simulator packets (`06 07/08/09/0A/0B/0C`) with 116 logical color indices and is useful when rear/logo LEDs ignore the 21-slot direct frame path.
+`sled-profile-set`/`sled-enable-set` are new profile-path probes from Bloody7 `Hid_sled` static calls (`opcode 0x15` / `0x16`, payload byte at offset `8`) and are intended for profile-backed rear LED experiments.
+`sled-profile-get`/`sled-enable-get` are read probes; some firmware revisions may still return zeros even when write probes affect behavior.
 `core-get` decodes from `opcode 0x1f` (`word @ payload[2..3]`, core = `(word & 0x3) + 1`), and `core-state` prints raw decode fields for RE.
 `core-set` remains a candidate mapping (`write opcode 0x0c payload 06 80 <core>`) and now supports `--verify` + `--retries` for safer readback validation.
 `core-scan` automates stepping through a core range (`--from/--to`) with optional readback verification, delay, and automatic restore to the initial core.

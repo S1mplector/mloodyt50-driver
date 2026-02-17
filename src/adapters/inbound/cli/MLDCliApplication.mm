@@ -494,6 +494,10 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
     printf("t50 subcommands:\n");
     printf("  t50 backlight-get [selectors]\n");
     printf("  t50 backlight-set --level <0..3> [selectors]\n");
+    printf("  t50 sled-profile-get [selectors]\n");
+    printf("  t50 sled-profile-set --index <0..255> [--save <0|1>] [--strategy <quick|capture-v1|capture-v2|capture-v3|capture-v4|major-sync>] [selectors]\n");
+    printf("  t50 sled-enable-get [selectors]\n");
+    printf("  t50 sled-enable-set --enabled <0|1> [--save <0|1>] [--strategy <quick|capture-v1|capture-v2|capture-v3|capture-v4|major-sync>] [selectors]\n");
     printf("  t50 core-get [selectors]\n");
     printf("  t50 core-state [selectors]\n");
     printf("  t50 core-set --core <1..4> [--verify <0|1>] [--retries <n>] [--save <0|1>] [--strategy <quick|capture-v1|capture-v2|capture-v3|capture-v4|major-sync>] [selectors]\n");
@@ -505,8 +509,9 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
     printf("  t50 opcode-scan [--from <n>] [--to <n>] [--flag <n>] [--offset <n>] [--data <hex>] [selectors]\n");
     printf("  t50 capture --file <path> [--from <n>] [--to <n>] [--flag <n>] [--offset <n>] [--data <hex>] [selectors]\n");
     printf("  t50 capture-diff --before <path> --after <path>\n");
+    printf("  t50 dpi-set --dpi <n> [--nearest <0|1>] [--calibrate-down <n>] [--delay-ms <n>] [--opcode <n>] [--commit <0|1>] [--save <0|1>] [--strategy <quick|capture-v1|capture-v2|capture-v3|capture-v4|major-sync>] [selectors]\n");
     printf("  t50 dpi-probe --opcode <n> --dpi <n> [--flag <n>] [--offset <n>] [selectors]\n");
-    printf("  t50 dpi-step --action <up|down|cycle> [--opcode <n>] [--commit <0|1>] [--save <0|1>] [--strategy <quick|capture-v1|capture-v2|capture-v3|capture-v4|major-sync>] [selectors]\n");
+    printf("  t50 dpi-step --action <up|down|cycle> [--count <n>] [--delay-ms <n>] [--opcode <n>] [--commit <0|1>] [--save <0|1>] [--strategy <quick|capture-v1|capture-v2|capture-v3|capture-v4|major-sync>] [selectors]\n");
     printf("  t50 polling-probe --opcode <n> --hz <n> [--flag <n>] [--offset <n>] [selectors]\n");
     printf("  t50 lod-probe --opcode <n> --lod <n> [--flag <n>] [--offset <n>] [selectors]\n");
     printf("  t50 color-mode --mode <open|effect|discard> [selectors]\n");
@@ -533,6 +538,18 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
     }
     if ([subcommand isEqualToString:@"backlight-set"]) {
         return [self runT50BacklightSetWithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"sled-profile-get"]) {
+        return [self runT50SLEDProfileGetWithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"sled-profile-set"]) {
+        return [self runT50SLEDProfileSetWithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"sled-enable-get"]) {
+        return [self runT50SLEDEnableGetWithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"sled-enable-set"]) {
+        return [self runT50SLEDEnableSetWithArguments:subArguments];
     }
     if ([subcommand isEqualToString:@"core-get"]) {
         return [self runT50CoreGetWithArguments:subArguments];
@@ -566,6 +583,9 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
     }
     if ([subcommand isEqualToString:@"capture-diff"]) {
         return [self runT50CaptureDiffWithArguments:subArguments];
+    }
+    if ([subcommand isEqualToString:@"dpi-set"]) {
+        return [self runT50DPISetWithArguments:subArguments];
     }
     if ([subcommand isEqualToString:@"dpi-probe"]) {
         return [self runT50DPIProbeWithArguments:subArguments];
@@ -674,6 +694,214 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
     }
 
     printf("t50 backlight-set ok level=%lu\n", (unsigned long)levelValue);
+    return 0;
+}
+
+- (int)runT50SLEDProfileGetWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[@"--vid", @"--pid", @"--serial", @"--model"]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    MLDMouseDevice *target = [self selectT50DeviceWithOptions:options errorMessage:&parseError];
+    if (target == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSError *error = nil;
+    NSNumber *index = [self.t50ExchangeCommandUseCase readSLEDProfileIndexCandidateForDevice:target error:&error];
+    if (index == nil) {
+        fprintf(stderr, "t50 sled-profile-get error: %s\n", error.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    printf("t50 sled-profile-get candidate-index=%lu\n", (unsigned long)index.unsignedIntegerValue);
+    return 0;
+}
+
+- (int)runT50SLEDProfileSetWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[
+        @"--index", @"--save", @"--strategy", @"--vid", @"--pid", @"--serial", @"--model"
+    ]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *indexString = options[@"--index"];
+    if (indexString == nil) {
+        fprintf(stderr, "t50 sled-profile-set requires --index <0..255>.\n");
+        return 1;
+    }
+
+    NSUInteger indexValue = 0;
+    NSUInteger saveValue = 0;
+    if (![self parseRequiredUnsigned:indexString maxValue:255 fieldName:@"--index" output:&indexValue errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--save"] maxValue:1 fieldName:@"--save" output:&saveValue errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *strategyOption = nil;
+    MLDT50SaveStrategy strategy = MLDT50SaveStrategyCaptureV3;
+    if (![self parseT50SaveStrategyOption:options[@"--strategy"]
+                             defaultValue:@"capture-v3"
+                               subcommand:@"t50 sled-profile-set"
+                                 strategy:&strategy
+                            strategyLabel:&strategyOption
+                             errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    MLDMouseDevice *target = [self selectT50DeviceWithOptions:options errorMessage:&parseError];
+    if (target == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSError *setError = nil;
+    BOOL setOK = [self.t50ExchangeCommandUseCase setSLEDProfileIndexCandidate:(uint8_t)indexValue
+                                                                      onDevice:target
+                                                                         error:&setError];
+    if (!setOK) {
+        fprintf(stderr, "t50 sled-profile-set error: %s\n", setError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    if (saveValue == 1) {
+        NSError *saveError = nil;
+        BOOL saveOK = [self.t50ExchangeCommandUseCase saveSettingsToDevice:target strategy:strategy error:&saveError];
+        if (!saveOK) {
+            fprintf(stderr, "t50 sled-profile-set save error: %s\n", saveError.localizedDescription.UTF8String);
+            return 1;
+        }
+    }
+
+    printf("t50 sled-profile-set requested=%lu save=%lu strategy=%s\n",
+           (unsigned long)indexValue,
+           (unsigned long)saveValue,
+           strategyOption.UTF8String);
+    return 0;
+}
+
+- (int)runT50SLEDEnableGetWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[@"--vid", @"--pid", @"--serial", @"--model"]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    MLDMouseDevice *target = [self selectT50DeviceWithOptions:options errorMessage:&parseError];
+    if (target == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSError *error = nil;
+    NSNumber *enabled = [self.t50ExchangeCommandUseCase readSLEDEnabledCandidateForDevice:target error:&error];
+    if (enabled == nil) {
+        fprintf(stderr, "t50 sled-enable-get error: %s\n", error.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    printf("t50 sled-enable-get enabled=%lu\n", (unsigned long)enabled.unsignedIntegerValue);
+    return 0;
+}
+
+- (int)runT50SLEDEnableSetWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[
+        @"--enabled", @"--save", @"--strategy", @"--vid", @"--pid", @"--serial", @"--model"
+    ]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *enabledString = options[@"--enabled"];
+    if (enabledString == nil) {
+        fprintf(stderr, "t50 sled-enable-set requires --enabled <0|1>.\n");
+        return 1;
+    }
+
+    NSUInteger enabledValue = 0;
+    NSUInteger saveValue = 0;
+    if (![self parseRequiredUnsigned:enabledString maxValue:1 fieldName:@"--enabled" output:&enabledValue errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--save"] maxValue:1 fieldName:@"--save" output:&saveValue errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *strategyOption = nil;
+    MLDT50SaveStrategy strategy = MLDT50SaveStrategyCaptureV3;
+    if (![self parseT50SaveStrategyOption:options[@"--strategy"]
+                             defaultValue:@"capture-v3"
+                               subcommand:@"t50 sled-enable-set"
+                                 strategy:&strategy
+                            strategyLabel:&strategyOption
+                             errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    MLDMouseDevice *target = [self selectT50DeviceWithOptions:options errorMessage:&parseError];
+    if (target == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSError *setError = nil;
+    BOOL setOK = [self.t50ExchangeCommandUseCase setSLEDEnabledCandidate:(enabledValue == 1)
+                                                                 onDevice:target
+                                                                    error:&setError];
+    if (!setOK) {
+        fprintf(stderr, "t50 sled-enable-set error: %s\n", setError.localizedDescription.UTF8String);
+        return 1;
+    }
+
+    if (saveValue == 1) {
+        NSError *saveError = nil;
+        BOOL saveOK = [self.t50ExchangeCommandUseCase saveSettingsToDevice:target strategy:strategy error:&saveError];
+        if (!saveOK) {
+            fprintf(stderr, "t50 sled-enable-set save error: %s\n", saveError.localizedDescription.UTF8String);
+            return 1;
+        }
+    }
+
+    printf("t50 sled-enable-set requested=%lu save=%lu strategy=%s\n",
+           (unsigned long)enabledValue,
+           (unsigned long)saveValue,
+           strategyOption.UTF8String);
     return 0;
 }
 
@@ -1717,6 +1945,164 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
     return 0;
 }
 
+- (int)runT50DPISetWithArguments:(NSArray<NSString *> *)arguments {
+    NSString *parseError = nil;
+    NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
+    if (options == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[
+        @"--dpi", @"--nearest", @"--calibrate-down", @"--delay-ms", @"--opcode", @"--commit", @"--save", @"--strategy", @"--vid",
+        @"--pid", @"--serial", @"--model"
+    ]];
+    if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    NSString *dpiString = options[@"--dpi"];
+    if (dpiString == nil) {
+        fprintf(stderr, "t50 dpi-set requires --dpi <n>.\n");
+        return 1;
+    }
+
+    NSUInteger dpiValue = 0;
+    NSUInteger nearestValue = 1;
+    NSUInteger calibrateDownValue = 10;
+    NSUInteger delayMilliseconds = 40;
+    NSUInteger opcode = 0x0F;
+    NSUInteger commitValue = 1;
+    NSUInteger saveValue = 1;
+    if (![self parseRequiredUnsigned:dpiString maxValue:20000 fieldName:@"--dpi" output:&dpiValue errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--nearest"] maxValue:1 fieldName:@"--nearest" output:&nearestValue errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--calibrate-down"] maxValue:1000 fieldName:@"--calibrate-down" output:&calibrateDownValue errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--delay-ms"] maxValue:5000 fieldName:@"--delay-ms" output:&delayMilliseconds errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--opcode"] maxValue:255 fieldName:@"--opcode" output:&opcode errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--commit"] maxValue:1 fieldName:@"--commit" output:&commitValue errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--save"] maxValue:1 fieldName:@"--save" output:&saveValue errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+    if (calibrateDownValue == 0) {
+        fprintf(stderr, "t50 dpi-set --calibrate-down must be at least 1.\n");
+        return 1;
+    }
+
+    NSString *strategyOption = nil;
+    MLDT50SaveStrategy strategy = MLDT50SaveStrategyCaptureV3;
+    if (![self parseT50SaveStrategyOption:options[@"--strategy"]
+                             defaultValue:@"capture-v3"
+                               subcommand:@"t50 dpi-set"
+                                 strategy:&strategy
+                            strategyLabel:&strategyOption
+                             errorMessage:&parseError]) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    MLDMouseDevice *target = [self selectT50DeviceWithOptions:options errorMessage:&parseError];
+    if (target == nil) {
+        fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+
+    static const NSUInteger kDefaultDPILadder[] = {400, 800, 1200, 1600, 2000, 3200, 4000};
+    const NSUInteger ladderCount = sizeof(kDefaultDPILadder) / sizeof(kDefaultDPILadder[0]);
+    NSUInteger targetIndex = NSNotFound;
+    BOOL exactMatch = NO;
+    for (NSUInteger index = 0; index < ladderCount; ++index) {
+        if (kDefaultDPILadder[index] == dpiValue) {
+            targetIndex = index;
+            exactMatch = YES;
+            break;
+        }
+    }
+
+    if (targetIndex == NSNotFound && nearestValue == 1) {
+        NSUInteger bestDiff = NSUIntegerMax;
+        for (NSUInteger index = 0; index < ladderCount; ++index) {
+            NSUInteger ladderValue = kDefaultDPILadder[index];
+            NSUInteger diff = (ladderValue > dpiValue) ? (ladderValue - dpiValue) : (dpiValue - ladderValue);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                targetIndex = index;
+            }
+        }
+    }
+
+    if (targetIndex == NSNotFound) {
+        fprintf(stderr, "Unsupported dpi value %lu. Use one of: 400, 800, 1200, 1600, 2000, 3200, 4000 (or pass --nearest 1).\n",
+                (unsigned long)dpiValue);
+        return 1;
+    }
+
+    for (NSUInteger index = 0; index < calibrateDownValue; ++index) {
+        BOOL shouldCommit = (commitValue == 1 && targetIndex == 0 && (index + 1) == calibrateDownValue);
+        NSError *stepError = nil;
+        BOOL stepped = [self.t50ExchangeCommandUseCase stepDPICandidateAction:MLDT50DPIStepActionDown
+                                                                        opcode:(uint8_t)opcode
+                                                                        commit:shouldCommit
+                                                                      onDevice:target
+                                                                         error:&stepError];
+        if (!stepped) {
+            fprintf(stderr, "t50 dpi-set calibrate error at %lu/%lu: %s\n",
+                    (unsigned long)(index + 1),
+                    (unsigned long)calibrateDownValue,
+                    stepError.localizedDescription.UTF8String);
+            return 1;
+        }
+
+        if (delayMilliseconds > 0 && ((index + 1) < calibrateDownValue || targetIndex > 0)) {
+            [NSThread sleepForTimeInterval:((NSTimeInterval)delayMilliseconds / 1000.0)];
+        }
+    }
+
+    for (NSUInteger index = 0; index < targetIndex; ++index) {
+        BOOL shouldCommit = (commitValue == 1 && (index + 1) == targetIndex);
+        NSError *stepError = nil;
+        BOOL stepped = [self.t50ExchangeCommandUseCase stepDPICandidateAction:MLDT50DPIStepActionUp
+                                                                        opcode:(uint8_t)opcode
+                                                                        commit:shouldCommit
+                                                                      onDevice:target
+                                                                         error:&stepError];
+        if (!stepped) {
+            fprintf(stderr, "t50 dpi-set apply error at %lu/%lu: %s\n",
+                    (unsigned long)(index + 1),
+                    (unsigned long)targetIndex,
+                    stepError.localizedDescription.UTF8String);
+            return 1;
+        }
+
+        if (delayMilliseconds > 0 && (index + 1) < targetIndex) {
+            [NSThread sleepForTimeInterval:((NSTimeInterval)delayMilliseconds / 1000.0)];
+        }
+    }
+
+    if (saveValue == 1) {
+        NSError *saveError = nil;
+        BOOL saved = [self.t50ExchangeCommandUseCase saveSettingsToDevice:target strategy:strategy error:&saveError];
+        if (!saved) {
+            fprintf(stderr, "t50 dpi-set save error: %s\n", saveError.localizedDescription.UTF8String);
+            return 1;
+        }
+    }
+
+    printf("t50 dpi-set ok requested=%lu target=%lu index=%lu exact=%lu calibrate-down=%lu delay-ms=%lu opcode=0x%02lx commit=%lu save=%lu strategy=%s\n",
+           (unsigned long)dpiValue,
+           (unsigned long)kDefaultDPILadder[targetIndex],
+           (unsigned long)targetIndex,
+           (unsigned long)(exactMatch ? 1 : 0),
+           (unsigned long)calibrateDownValue,
+           (unsigned long)delayMilliseconds,
+           (unsigned long)opcode,
+           (unsigned long)commitValue,
+           (unsigned long)saveValue,
+           strategyOption.UTF8String);
+    return 0;
+}
+
 - (int)runT50DPIProbeWithArguments:(NSArray<NSString *> *)arguments {
     NSString *parseError = nil;
     NSDictionary<NSString *, NSString *> *options = [self parseOptionMapFromArguments:arguments errorMessage:&parseError];
@@ -1779,7 +2165,8 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
     }
 
     NSSet<NSString *> *allowed = [NSSet setWithArray:@[
-        @"--action", @"--opcode", @"--commit", @"--save", @"--strategy", @"--vid", @"--pid", @"--serial", @"--model"
+        @"--action", @"--count", @"--delay-ms", @"--opcode", @"--commit", @"--save", @"--strategy", @"--vid", @"--pid",
+        @"--serial", @"--model"
     ]];
     if (![self validateAllowedOptions:allowed options:options errorMessage:&parseError]) {
         fprintf(stderr, "%s\n", parseError.UTF8String);
@@ -1793,25 +2180,33 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
     }
 
     NSString *normalizedAction = action.lowercaseString;
-    uint8_t actionCode = 0;
+    MLDT50DPIStepAction stepAction = MLDT50DPIStepActionDown;
     if ([normalizedAction isEqualToString:@"down"]) {
-        actionCode = 0x00;
+        stepAction = MLDT50DPIStepActionDown;
     } else if ([normalizedAction isEqualToString:@"up"]) {
-        actionCode = 0x01;
+        stepAction = MLDT50DPIStepActionUp;
     } else if ([normalizedAction isEqualToString:@"cycle"]) {
-        actionCode = 0x02;
+        stepAction = MLDT50DPIStepActionCycle;
     } else {
         fprintf(stderr, "t50 dpi-step --action must be one of: up, down, cycle.\n");
         return 1;
     }
 
+    NSUInteger countValue = 1;
+    NSUInteger delayMilliseconds = 0;
     NSUInteger opcode = 0x0F;
     NSUInteger commitValue = 1;
     NSUInteger saveValue = 0;
-    if (![self parseOptionalUnsigned:options[@"--opcode"] maxValue:255 fieldName:@"--opcode" output:&opcode errorMessage:&parseError] ||
+    if (![self parseOptionalUnsigned:options[@"--count"] maxValue:1000 fieldName:@"--count" output:&countValue errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--delay-ms"] maxValue:5000 fieldName:@"--delay-ms" output:&delayMilliseconds errorMessage:&parseError] ||
+        ![self parseOptionalUnsigned:options[@"--opcode"] maxValue:255 fieldName:@"--opcode" output:&opcode errorMessage:&parseError] ||
         ![self parseOptionalUnsigned:options[@"--commit"] maxValue:1 fieldName:@"--commit" output:&commitValue errorMessage:&parseError] ||
         ![self parseOptionalUnsigned:options[@"--save"] maxValue:1 fieldName:@"--save" output:&saveValue errorMessage:&parseError]) {
         fprintf(stderr, "%s\n", parseError.UTF8String);
+        return 1;
+    }
+    if (countValue == 0) {
+        fprintf(stderr, "t50 dpi-step --count must be at least 1.\n");
         return 1;
     }
 
@@ -1833,30 +2228,24 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
         return 1;
     }
 
-    NSData *payload = [NSData dataWithBytes:&actionCode length:1];
-    NSError *stepError = nil;
-    NSData *stepResponse = [self.t50ExchangeCommandUseCase executeForDevice:target
-                                                                      opcode:(uint8_t)opcode
-                                                                   writeFlag:0x00
-                                                               payloadOffset:8
-                                                                     payload:payload
-                                                                       error:&stepError];
-    if (stepResponse == nil) {
-        fprintf(stderr, "t50 dpi-step action error: %s\n", stepError.localizedDescription.UTF8String);
-        return 1;
-    }
-
-    if (commitValue == 1) {
-        NSError *commitError = nil;
-        NSData *commitResponse = [self.t50ExchangeCommandUseCase executeForDevice:target
-                                                                            opcode:0x0A
-                                                                         writeFlag:0x00
-                                                                     payloadOffset:8
-                                                                           payload:[NSData data]
-                                                                             error:&commitError];
-        if (commitResponse == nil) {
-            fprintf(stderr, "t50 dpi-step commit error: %s\n", commitError.localizedDescription.UTF8String);
+    for (NSUInteger index = 0; index < countValue; ++index) {
+        BOOL shouldCommit = (commitValue == 1 && index == (countValue - 1));
+        NSError *stepError = nil;
+        BOOL stepped = [self.t50ExchangeCommandUseCase stepDPICandidateAction:stepAction
+                                                                        opcode:(uint8_t)opcode
+                                                                        commit:shouldCommit
+                                                                      onDevice:target
+                                                                         error:&stepError];
+        if (!stepped) {
+            fprintf(stderr, "t50 dpi-step action error at %lu/%lu: %s\n",
+                    (unsigned long)(index + 1),
+                    (unsigned long)countValue,
+                    stepError.localizedDescription.UTF8String);
             return 1;
+        }
+
+        if (delayMilliseconds > 0 && index + 1 < countValue) {
+            [NSThread sleepForTimeInterval:((NSTimeInterval)delayMilliseconds / 1000.0)];
         }
     }
 
@@ -1869,8 +2258,10 @@ static const NSUInteger MLDT50SimulatorChunkSplitOffset = 56;
         }
     }
 
-    printf("t50 dpi-step ok action=%s opcode=0x%02lx commit=%lu save=%lu strategy=%s\n",
+    printf("t50 dpi-step ok action=%s count=%lu delay-ms=%lu opcode=0x%02lx commit=%lu save=%lu strategy=%s\n",
            normalizedAction.UTF8String,
+           (unsigned long)countValue,
+           (unsigned long)delayMilliseconds,
            (unsigned long)opcode,
            (unsigned long)commitValue,
            (unsigned long)saveValue,

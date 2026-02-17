@@ -247,6 +247,162 @@ int main(void) {
             return 1;
         }
 
+        NSError *sledProfileSetError = nil;
+        BOOL sledProfileSetOK = [useCase setSLEDProfileIndexCandidate:5 onDevice:device error:&sledProfileSetError];
+        if (!Expect(sledProfileSetOK, @"Expected SLED profile candidate write to succeed.")) {
+            return 1;
+        }
+        if (!Expect(sledProfileSetError == nil, @"Expected no error for valid SLED profile candidate write.")) {
+            return 1;
+        }
+
+        NSData *sledProfilePacket = transport.writtenReports[@([MLDT50ExchangeVendorCommandUseCase reportID])];
+        if (!Expect(sledProfilePacket != nil, @"Expected SLED profile candidate packet to be written.")) {
+            return 1;
+        }
+        const uint8_t *sledProfilePacketBytes = (const uint8_t *)sledProfilePacket.bytes;
+        if (!Expect(sledProfilePacketBytes[1] == 0x15 && sledProfilePacketBytes[4] == 0x00 &&
+                        sledProfilePacketBytes[8] == 0x05,
+                    @"Expected SLED profile candidate packet bytes to match opcode 0x15 / payload index @ byte 8.")) {
+            return 1;
+        }
+
+        NSError *sledEnableSetError = nil;
+        BOOL sledEnableSetOK = [useCase setSLEDEnabledCandidate:YES onDevice:device error:&sledEnableSetError];
+        if (!Expect(sledEnableSetOK, @"Expected SLED enable candidate write to succeed.")) {
+            return 1;
+        }
+        if (!Expect(sledEnableSetError == nil, @"Expected no error for valid SLED enable candidate write.")) {
+            return 1;
+        }
+
+        NSData *sledEnablePacket = transport.writtenReports[@([MLDT50ExchangeVendorCommandUseCase reportID])];
+        if (!Expect(sledEnablePacket != nil, @"Expected SLED enable candidate packet to be written.")) {
+            return 1;
+        }
+        const uint8_t *sledEnablePacketBytes = (const uint8_t *)sledEnablePacket.bytes;
+        if (!Expect(sledEnablePacketBytes[1] == 0x16 && sledEnablePacketBytes[4] == 0x00 &&
+                        sledEnablePacketBytes[8] == 0x01,
+                    @"Expected SLED enable candidate packet bytes to match opcode 0x16 / boolean @ byte 8.")) {
+            return 1;
+        }
+
+        MLDRecordingFeatureTransportSpy *sledReadSpy = [[MLDRecordingFeatureTransportSpy alloc] init];
+        NSMutableData *sledProfileReadResponse = [NSMutableData dataWithLength:[MLDT50ExchangeVendorCommandUseCase packetLength]];
+        uint8_t *sledProfileReadBytes = (uint8_t *)sledProfileReadResponse.mutableBytes;
+        sledProfileReadBytes[0] = 0x07;
+        sledProfileReadBytes[1] = 0x15;
+        sledProfileReadBytes[8] = 0x06;
+        sledReadSpy.forcedReadPayload = sledProfileReadResponse;
+        MLDT50ExchangeVendorCommandUseCase *sledReadUseCase =
+            [[MLDT50ExchangeVendorCommandUseCase alloc] initWithFeatureTransportPort:sledReadSpy];
+
+        NSError *sledProfileReadError = nil;
+        NSNumber *sledProfile = [sledReadUseCase readSLEDProfileIndexCandidateForDevice:device error:&sledProfileReadError];
+        if (!Expect(sledProfile != nil, @"Expected SLED profile read candidate to return value.")) {
+            return 1;
+        }
+        if (!Expect(sledProfileReadError == nil, @"Expected no error for SLED profile read candidate.")) {
+            return 1;
+        }
+        if (!Expect(sledProfile.unsignedIntegerValue == 6,
+                    @"Expected SLED profile read candidate to decode byte 8.")) {
+            return 1;
+        }
+
+        NSMutableData *sledEnableReadResponse = [NSMutableData dataWithLength:[MLDT50ExchangeVendorCommandUseCase packetLength]];
+        uint8_t *sledEnableReadBytes = (uint8_t *)sledEnableReadResponse.mutableBytes;
+        sledEnableReadBytes[0] = 0x07;
+        sledEnableReadBytes[1] = 0x16;
+        sledEnableReadBytes[8] = 0x01;
+        sledReadSpy.forcedReadPayload = sledEnableReadResponse;
+
+        NSError *sledEnableReadError = nil;
+        NSNumber *sledEnabled = [sledReadUseCase readSLEDEnabledCandidateForDevice:device error:&sledEnableReadError];
+        if (!Expect(sledEnabled != nil, @"Expected SLED enable read candidate to return value.")) {
+            return 1;
+        }
+        if (!Expect(sledEnableReadError == nil, @"Expected no error for SLED enable read candidate.")) {
+            return 1;
+        }
+        if (!Expect(sledEnabled.unsignedIntegerValue == 1,
+                    @"Expected SLED enable read candidate to normalize non-zero byte to 1.")) {
+            return 1;
+        }
+
+        MLDRecordingFeatureTransportSpy *dpiStepSpy = [[MLDRecordingFeatureTransportSpy alloc] init];
+        MLDT50ExchangeVendorCommandUseCase *dpiStepUseCase =
+            [[MLDT50ExchangeVendorCommandUseCase alloc] initWithFeatureTransportPort:dpiStepSpy];
+
+        NSError *dpiStepError = nil;
+        BOOL dpiStepOK = [dpiStepUseCase stepDPICandidateAction:MLDT50DPIStepActionUp
+                                                         opcode:0x0F
+                                                         commit:NO
+                                                       onDevice:device
+                                                          error:&dpiStepError];
+        if (!Expect(dpiStepOK, @"Expected DPI step candidate action to succeed without commit.")) {
+            return 1;
+        }
+        if (!Expect(dpiStepError == nil, @"Expected no error for valid DPI step candidate action.")) {
+            return 1;
+        }
+        if (!Expect(dpiStepSpy.writes.count == 1, @"Expected one packet for non-commit DPI step candidate action.")) {
+            return 1;
+        }
+        const uint8_t *dpiStepPacket = (const uint8_t *)dpiStepSpy.writes.firstObject.bytes;
+        if (!Expect(dpiStepPacket[1] == 0x0f && dpiStepPacket[8] == 0x01,
+                    @"Expected non-commit DPI step packet to use opcode 0x0F with action byte 0x01.")) {
+            return 1;
+        }
+
+        [dpiStepSpy.writes removeAllObjects];
+        NSError *dpiCommitError = nil;
+        BOOL dpiCommitOK = [dpiStepUseCase stepDPICandidateAction:MLDT50DPIStepActionCycle
+                                                           opcode:0x0F
+                                                           commit:YES
+                                                         onDevice:device
+                                                            error:&dpiCommitError];
+        if (!Expect(dpiCommitOK, @"Expected DPI step candidate action with commit to succeed.")) {
+            return 1;
+        }
+        if (!Expect(dpiCommitError == nil, @"Expected no error for committed DPI step candidate action.")) {
+            return 1;
+        }
+        if (!Expect(dpiStepSpy.writes.count == 2, @"Expected two packets for committed DPI step candidate action.")) {
+            return 1;
+        }
+        const uint8_t *dpiCommitStepPacket = (const uint8_t *)dpiStepSpy.writes.firstObject.bytes;
+        if (!Expect(dpiCommitStepPacket[1] == 0x0f && dpiCommitStepPacket[8] == 0x02,
+                    @"Expected committed DPI step packet to encode cycle action byte 0x02.")) {
+            return 1;
+        }
+        const uint8_t *dpiCommitTailPacket = (const uint8_t *)dpiStepSpy.writes.lastObject.bytes;
+        if (!Expect(dpiCommitTailPacket[1] == 0x0a,
+                    @"Expected committed DPI step packet tail to issue opcode 0x0A commit.")) {
+            return 1;
+        }
+
+        [dpiStepSpy.writes removeAllObjects];
+        NSError *dpiInvalidError = nil;
+        BOOL dpiInvalid = [dpiStepUseCase stepDPICandidateAction:(MLDT50DPIStepAction)99
+                                                          opcode:0x0F
+                                                          commit:NO
+                                                        onDevice:device
+                                                           error:&dpiInvalidError];
+        if (!Expect(!dpiInvalid, @"Expected invalid DPI step action to fail.")) {
+            return 1;
+        }
+        if (!Expect(dpiInvalidError != nil, @"Expected error for invalid DPI step action.")) {
+            return 1;
+        }
+        if (!Expect(dpiInvalidError.code == MLDT50ControlErrorCodeInvalidDPIStepAction,
+                    @"Expected invalid-DPI-step-action error code.")) {
+            return 1;
+        }
+        if (!Expect(dpiStepSpy.writes.count == 0, @"Expected no packets when DPI step action is invalid.")) {
+            return 1;
+        }
+
         MLDRecordingFeatureTransportSpy *saveSpy = [[MLDRecordingFeatureTransportSpy alloc] init];
         MLDT50ExchangeVendorCommandUseCase *saveUseCase =
             [[MLDT50ExchangeVendorCommandUseCase alloc] initWithFeatureTransportPort:saveSpy];
